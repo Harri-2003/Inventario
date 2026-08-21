@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Control de Materiales — Fibra Óptica</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+
+  :root{
+    --bg:#0b0f13;
+    --bg-glow: radial-gradient(ellipse 900px 400px at 50% -10%, rgba(63,208,192,0.12), transparent 60%);
+    --panel:#131920;
+    --panel2:#1a222a;
+    --panel3:#212b34;
+    --line:#26313b;
+    --line-soft:#1d262e;
+    --text:#edf1f0;
+    --text-mut:#8b98a3;
+    --text-dim:#5c6b76;
+
+    --cyan:#3fd0c0;      /* señal de luz viajando por la fibra */
+    --cyan-dim:rgba(63,208,192,0.14);
+    --apc-green:#4fd482; /* color real de conector APC */
+    --apc-green-dim:rgba(79,212,130,0.14);
+    --upc-blue:#4f9dfa;  /* color real de conector UPC */
+    --amber:#f5ab3d;     /* LED de advertencia */
+    --amber-dim:rgba(245,171,61,0.14);
+    --red:#f0564f;       /* LED de alarma */
+    --red-dim:rgba(240,86,79,0.14);
+
+    --font-display:'Space Grotesk', 'Segoe UI', sans-serif;
+    --font-body:'Inter', -apple-system, 'Segoe UI', sans-serif;
+    --mono:'JetBrains Mono', 'Courier New', monospace;
+
+    --radius:12px;
+    --radius-sm:8px;
+  }
+
+  *{box-sizing:border-box;}
+  html{-webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0;
+    background:var(--bg) var(--bg-glow);
+    background-attachment:fixed;
+    color:var(--text);
+    font-family:var(--font-body);
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .app{max-width:960px;margin:0 auto;padding:0 16px 40px;}
+
+  /* ---------- Header ---------- */
+  .topbar{
+    position:sticky;top:0;z-index:30;
+    display:flex;align-items:center;justify-content:space-between;
+    gap:12px;
+    padding:16px 16px;
+    margin:0 -16px;
+    background:rgba(11,15,19,0.86);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .brand{display:flex;align-items:center;gap:11px;}
+  .brand-mark{flex:none;}
+  .brand h1{
+    font-family:var(--font-display);
+    font-size:16px;font-weight:700;margin:0;letter-spacing:0.1px;line-height:1.15;
+  }
+  .brand-sub{font-size:11.5px;color:var(--text-mut);margin:1px 0 0;letter-spacing:0.3px;}
+
+  .led-pill{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:20px;height:20px;flex:none;cursor:default;
+  }
+  .led-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--text-dim);flex:none;}
+  .led-pill.led-ok .dot{background:var(--apc-green);box-shadow:0 0 0 3px var(--apc-green-dim);animation:ledpulse 2.2s ease-in-out infinite;}
+  .led-pill.led-local .dot{background:var(--amber);box-shadow:0 0 0 3px var(--amber-dim);}
+  .led-pill.led-error .dot{background:var(--red);box-shadow:0 0 0 3px var(--red-dim);}
+  .led-pill.led-checking .dot{background:var(--text-dim);animation:ledpulse 1s ease-in-out infinite;}
+  @keyframes ledpulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+
+  /* ---------- Stat strip ---------- */
+  .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0;}
+  .metric{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px 14px;position:relative;overflow:hidden;
+  }
+  .metric::before{
+    content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--text-dim);
+  }
+  .metric.low::before{background:var(--red);}
+  .metric.warn::before{background:var(--amber);}
+  .metric.ok::before{background:var(--apc-green);}
+  .metric .n{font-family:var(--font-display);font-size:26px;font-weight:700;line-height:1;}
+  .metric .l{font-size:10.5px;color:var(--text-mut);text-transform:uppercase;letter-spacing:0.6px;margin-top:6px;}
+
+  /* ---------- Tabs ---------- */
+  .tabs{
+    display:flex;gap:4px;margin:4px 0 16px;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:4px;
+  }
+  .tab-btn{
+    flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
+    background:transparent;border:none;color:var(--text-mut);
+    padding:10px 8px;border-radius:var(--radius-sm);
+    font-family:var(--font-body);font-size:12.5px;font-weight:600;
+    cursor:pointer;transition:background .15s, color .15s;
+  }
+  .tab-btn svg{width:16px;height:16px;flex:none;}
+  .tab-btn:hover{color:var(--text);}
+  .tab-btn.active{background:var(--panel3);color:var(--cyan);}
+  .tab-btn .tab-label{white-space:nowrap;}
+
+  /* ---------- Cards ---------- */
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 18px;margin-bottom:14px;
+  }
+  .card h2{
+    font-family:var(--font-display);
+    font-size:13.5px;font-weight:600;letter-spacing:0.1px;
+    color:var(--text);margin:0 0 12px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .card h2 .eyebrow{
+    font-size:10px;color:var(--cyan);text-transform:uppercase;letter-spacing:0.8px;
+    background:var(--cyan-dim);padding:2px 7px;border-radius:100px;font-weight:700;
+  }
+
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{font-size:11.5px;color:var(--text-mut);display:block;margin-bottom:5px;font-weight:500;}
+  input[type=text],input[type=number],input[type=password]{
+    background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:var(--radius-sm);padding:9px 10px;font-size:13px;
+    font-family:var(--mono);width:100%;
+  }
+  input:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim);}
+  .field{flex:1;min-width:160px;}
+
+  button{
+    background:var(--panel3);border:1px solid var(--line);color:var(--text);
+    padding:9px 15px;border-radius:var(--radius-sm);font-size:12.5px;font-weight:600;
+    cursor:pointer;font-family:var(--font-body);transition:border-color .15s, opacity .15s;
+  }
+  button:hover{border-color:var(--cyan);}
+  button.primary{background:var(--cyan);color:#062723;border-color:var(--cyan);}
+  button.primary:hover{opacity:0.88;}
+  button.danger-btn{background:transparent;color:var(--red);border-color:rgba(240,86,79,0.35);}
+  button.danger-btn:hover{background:var(--red-dim);border-color:var(--red);}
+
+  .upload-zone{
+    border:1.5px dashed var(--line);border-radius:var(--radius);
+    padding:26px 16px;text-align:center;cursor:pointer;
+    color:var(--text-mut);font-size:13px;transition:border-color .15s, background .15s;
+  }
+  .upload-zone:hover{border-color:var(--cyan);color:var(--text);background:var(--cyan-dim);}
+  .upload-zone .up-icon{width:26px;height:26px;margin:0 auto 8px;display:block;color:var(--text-dim);}
+  .upload-zone:hover .up-icon{color:var(--cyan);}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{
+    text-align:left;color:var(--text-mut);font-weight:600;
+    padding:8px 8px;border-bottom:1px solid var(--line);
+    font-size:10.5px;text-transform:uppercase;letter-spacing:0.5px;
+  }
+  td{padding:8px;border-bottom:1px solid var(--line-soft);vertical-align:middle;}
+  tr.low td{background:var(--red-dim);}
+  tr.warn td{background:var(--amber-dim);}
+  .name-cell{font-weight:600;}
+  input.qty,input.minv{width:74px;font-family:var(--mono);text-align:right;}
+
+  .badge{
+    display:inline-flex;align-items:center;gap:5px;
+    padding:3px 9px 3px 7px;border-radius:100px;font-size:10.5px;font-weight:700;
+  }
+  .badge::before{content:'';width:6px;height:6px;border-radius:50%;}
+  .badge.ok{background:var(--apc-green-dim);color:var(--apc-green);}
+  .badge.ok::before{background:var(--apc-green);}
+  .badge.warn{background:var(--amber-dim);color:var(--amber);}
+  .badge.warn::before{background:var(--amber);}
+  .badge.low{background:var(--red-dim);color:var(--red);}
+  .badge.low::before{background:var(--red);}
+
+  .del{color:var(--text-dim);cursor:pointer;background:none;border:none;font-size:15px;padding:2px 6px;}
+  .del:hover{color:var(--red);}
+
+  .status{font-size:12px;margin-top:10px;color:var(--text-mut);min-height:16px;}
+  .status.ok{color:var(--apc-green);}
+  .status.err{color:var(--red);}
+
+  .footer-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+  .hidden-input{display:none;}
+  .note{font-size:12px;color:var(--text-mut);line-height:1.55;margin:0 0 12px;}
+
+  /* ---------- Recipients / filter badges ---------- */
+  #recipientsList .badge{padding:5px 6px 5px 10px;font-size:12px;}
+
+  /* ---------- Responsive table -> card list on mobile ---------- */
+  @media (max-width: 680px){
+    .app{padding:0 12px 90px;}
+    .topbar{padding:13px 12px;margin:0 -12px;}
+    .brand h1{font-size:14.5px;}
+    .summary{grid-template-columns:repeat(3,1fr);gap:8px;}
+    .metric{padding:11px 10px;}
+    .metric .n{font-size:20px;}
+    .metric .l{font-size:9px;}
+
+    /* Tabs -> bottom nav bar */
+    .tabs{
+      position:fixed;left:0;right:0;bottom:0;z-index:40;
+      margin:0;border-radius:0;border:none;border-top:1px solid var(--line);
+      padding:6px 6px calc(6px + env(safe-area-inset-bottom));
+      background:rgba(19,25,32,0.96);backdrop-filter:blur(10px);
+    }
+    .tab-btn{flex-direction:column;gap:3px;padding:7px 4px;font-size:10px;}
+    .tab-btn svg{width:19px;height:19px;}
+
+    table thead{display:none;}
+    table, tbody, tr, td{display:block;width:100%;}
+    tr{
+      background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius-sm);
+      padding:10px 12px;margin-bottom:8px;
+    }
+    tr.low{border-color:rgba(240,86,79,0.4);}
+    tr.warn{border-color:rgba(245,171,61,0.4);}
+    td{
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+      border-bottom:none;padding:5px 0;
+    }
+    td[data-label]:not([data-label=""])::before{
+      content:attr(data-label);font-size:10.5px;color:var(--text-mut);
+      text-transform:uppercase;letter-spacing:0.4px;font-weight:600;flex:none;
+    }
+    td input{text-align:right;}
+    .name-cell input{text-align:left !important;font-size:14px;}
+  }
+
+
+  /* ---------- Extras para la versión Supabase ---------- */
+  .gear-btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:34px;height:34px;border-radius:50%;
+    background:var(--panel2);border:1px solid var(--line);color:var(--text-dim);
+    cursor:pointer;flex:none;
+  }
+  .gear-btn:hover{color:var(--cyan);border-color:var(--cyan);}
+  .gear-btn svg{width:16px;height:16px;}
+
+  .group-switch{display:flex;gap:6px;margin-bottom:14px;}
+  .group-switch button{
+    flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text-mut);
+    padding:8px;font-size:12px;
+  }
+  .group-switch button.active{background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan);}
+
+  .grp-tag{font-size:10px;padding:2px 7px;border-radius:100px;font-weight:700;letter-spacing:0.3px;}
+  .grp-tag.General{background:var(--upc-blue-dim,rgba(79,157,250,0.14));color:var(--upc-blue);}
+  .grp-tag.Troncal{background:var(--amber-dim);color:var(--amber);}
+
+  .admin-back{
+    display:inline-flex;align-items:center;gap:6px;color:var(--text-mut);
+    background:none;border:none;font-size:12.5px;cursor:pointer;padding:0;margin-bottom:14px;
+  }
+  .admin-back:hover{color:var(--cyan);}
+
+  textarea{
+    background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:var(--radius-sm);padding:9px 10px;font-size:13px;font-family:var(--mono);
+    width:100%;min-height:90px;resize:vertical;
+  }
+  textarea:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 0 3px var(--cyan-dim);}
+
+  select{
+    background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:var(--radius-sm);padding:9px 10px;font-size:13px;font-family:var(--font-body);width:100%;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" width="30" height="30" viewBox="0 0 30 30" fill="none">
+        <circle cx="15" cy="15" r="13" stroke="#3fd0c0" stroke-width="1.4" opacity="0.35"/>
+        <circle cx="15" cy="15" r="7.5" stroke="#3fd0c0" stroke-width="1.6"/>
+        <circle cx="15" cy="15" r="2.4" fill="#3fd0c0"/>
+        <path d="M15 1.5V5M15 25V28.5M1.5 15H5M25 15H28.5" stroke="#3fd0c0" stroke-width="1.4" stroke-linecap="round" opacity="0.6"/>
+      </svg>
+      <h1>Control de Materiales</h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div class="led-pill led-checking" id="connLed" title="Conectando…">
+        <span class="dot"></span>
+      </div>
+      <button class="gear-btn" id="adminGearBtn" title="Panel de administración">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="summary" id="summary"></div>
+
+  <nav class="tabs" id="tabsNav">
+    <button class="tab-btn active" data-tab="inventario">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+      <span class="tab-label">Inventario</span>
+    </button>
+    <button class="tab-btn" data-tab="troncal">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 6a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2M4 6v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6"/><path d="M9 14h6"/></svg>
+      <span class="tab-label">Troncal</span>
+    </button>
+    <button class="tab-btn" data-tab="alertas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      <span class="tab-label">Alertas</span>
+    </button>
+  </nav>
+
+  <main>
+
+    <section class="tab-panel" data-panel="inventario">
+      <div class="card">
+        <h2>Cargar inventario desde Excel</h2>
+        <div class="upload-zone" id="uploadZone">
+          <svg class="up-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M12 4 8 8M12 4l4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+          Haz clic aquí o arrastra tu archivo .xlsx / .csv<br>
+          <span style="font-size:11px;">Solo se importan los productos de la lista permitida (panel admin)</span>
+        </div>
+        <input type="file" id="fileInput" class="hidden-input" accept=".xlsx,.xls,.csv">
+        <div class="status" id="uploadStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="justify-content:space-between;">
+          <span>Inventario</span>
+          <button id="invEditBtn" style="font-size:11px;padding:6px 11px;">🔒 Editar</button>
+        </h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Material</th>
+              <th style="text-align:right;">Cantidad</th>
+              <th style="text-align:right;">Mínimo</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+        <div class="footer-actions" id="invActions" style="display:none;">
+          <button id="addRowBtn">+ Agregar material</button>
+          <button class="danger-btn" id="cleanBtn">Quitar fuera de lista</button>
+          <button id="dedupBtn">Unir duplicados</button>
+          <button class="danger-btn" id="resetBtn">Vaciar todo</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="troncal" style="display:none">
+      <div class="card">
+        <h2 style="justify-content:space-between;">
+          <span>Registro de entregas — Troncal</span>
+          <button id="troncalEditBtn" style="font-size:11px;padding:6px 11px;">🔒 Editar</button>
+        </h2>
+        <p class="note">Registro de cable de fibra troncal entregado: cuánto, a quién y cuándo. No maneja mínimos ni alertas, es solo una bitácora.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Material</th>
+              <th style="text-align:right;">Metros</th>
+              <th>Entregado a</th>
+              <th>Fecha</th>
+              <th>Observación</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="troncalTbody"></tbody>
+        </table>
+        <div class="footer-actions" id="troncalActions" style="display:none;">
+          <button id="addTroncalBtn">+ Agregar entrega</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="alertas" style="display:none">
+      <div class="card">
+        <h2><span class="eyebrow">Activo</span> Aviso automático</h2>
+        <p class="note">
+          Ya no depende de tener esta página abierta: el servidor de Supabase revisa el stock apenas
+          cambia una cantidad y avisa por Telegram al instante — funciona 24/7, con el computador apagado también.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Destinatarios de la alerta</h2>
+        <p class="note">Cada destinatario elige a qué grupo de alertas está suscrito. La persona debe primero escribirle a tu bot y darte su chat_id.</p>
+        <div id="recipientsList" style="margin-bottom:12px;"></div>
+        <div class="row">
+          <div class="field">
+            <label>Chat ID nuevo</label>
+            <input type="text" id="newChatId" placeholder="ej: 987654321">
+          </div>
+          <div class="field">
+            <label>Nombre (opcional)</label>
+            <input type="text" id="newChatName" placeholder="ej: Juan">
+          </div>
+          <div class="field" style="min-width:130px;">
+            <label>Grupos</label>
+            <select id="newChatGroups">
+              <option value="General,Troncal">General + Troncal</option>
+              <option value="General">Solo General</option>
+              <option value="Troncal">Solo Troncal</option>
+            </select>
+          </div>
+          <button id="addRecipientBtn">Agregar</button>
+        </div>
+        <div class="status" id="recipientsStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Reporte manual</h2>
+        <p class="note">Recibe por Telegram el estado completo del stock actual, cuando quieras.</p>
+        <div class="row">
+          <button class="primary" id="sendAllBtn">Enviar todo</button>
+          <button id="sendGeneralBtn">Solo General</button>
+          <button id="sendTroncalBtn">Solo Troncal</button>
+        </div>
+        <div class="status" id="alertStatus"></div>
+      </div>
+    </section>
+
+    <!-- Panel oculto: no tiene botón en la barra de pestañas, solo se abre con el ícono ⚙ + clave -->
+    <section class="tab-panel" data-panel="admin" style="display:none">
+      <button class="admin-back" id="adminBackBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        Volver
+      </button>
+
+      <div class="card">
+        <h2>Productos permitidos (lista blanca)</h2>
+        <p class="note">
+          Solo los productos cuyo nombre coincida <b>exactamente</b> con uno de esta lista se importan del Excel
+          (sin importar mayúsculas/minúsculas ni espacios de más). Todo lo demás se ignora.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Nombre exacto (como aparece en tu Excel)</th>
+              <th style="text-align:right;">Mínimo</th>
+              <th>Grupo</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="permitidosTbody"></tbody>
+        </table>
+        <div class="footer-actions">
+          <button id="addPermitidoBtn">+ Agregar uno</button>
+        </div>
+        <div class="status" id="permitidosStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Agregar varios de una vez</h2>
+        <p class="note">Pega un nombre de producto exacto por línea. Se agregan todos con el mismo mínimo y grupo (los puedes ajustar después uno por uno).</p>
+        <textarea id="bulkNames" placeholder="Amarra Plástica Blanca 10 Cm&#10;Amarra Plástica Blanca 25 Cm&#10;Amarra Plástica Negra 10 Cm"></textarea>
+        <div class="row" style="margin-top:10px;">
+          <div class="field" style="max-width:140px;">
+            <label>Mínimo</label>
+            <input type="number" id="bulkMin" value="10">
+          </div>
+          <div class="field" style="max-width:160px;">
+            <label>Grupo</label>
+            <select id="bulkGroup">
+              <option value="General">General</option>
+              <option value="Troncal">Troncal</option>
+            </select>
+          </div>
+          <button class="primary" id="bulkAddBtn">Agregar todos</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Alerta programada</h2>
+        <p class="note">Envía el reporte completo automáticamente un día y hora específicos, sin que nadie abra nada.</p>
+        <div id="scheduleList" style="margin-bottom:12px;"></div>
+        <div class="row">
+          <div class="field">
+            <label>Día</label>
+            <select id="schDay">
+              <option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option>
+              <option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option>
+            </select>
+          </div>
+          <div class="field" style="max-width:100px;">
+            <label>Hora (0-23)</label>
+            <input type="number" id="schHour" min="0" max="23" value="7">
+          </div>
+          <div class="field" style="max-width:100px;">
+            <label>Minuto</label>
+            <input type="number" id="schMin" min="0" max="55" step="5" value="0">
+          </div>
+          <button class="primary" id="addScheduleBtn">Programar</button>
+        </div>
+        <div class="status" id="scheduleStatus"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+// ================== Configuración ==================
+// Pega aquí los datos de tu proyecto (Supabase > Project Settings > API).
+// La "anon key" está pensada para ser pública, va en el navegador sin problema.
+const SUPABASE_URL = "https://zxwoqchsiuhfhgwpjlvo.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_Oa1Em5CV8Unlf9IeFJtiPA_didmx56e";
+
+// Clave para entrar al panel de administración (Productos permitidos + Alerta programada).
+// Cámbiala por la que quieras usar:
+const ADMIN_PASSWORD = "bodega2026";
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let items = [];
+let permitidos = [];
+let recipients = [];
+let schedules = [];
+let troncalEntries = [];
+
+function uid(){ return 'i'+Math.random().toString(36).slice(2,10); }
+
+function isAdmin(){
+  return sessionStorage.getItem('admin-unlocked') === '1';
+}
+
+function requireAdmin(){
+  if(isAdmin()) return true;
+  const pass = window.prompt('Esta acción es solo para administradores. Escribe la clave:');
+  if(pass === null) return false;
+  if(pass !== ADMIN_PASSWORD){ alert('Clave incorrecta.'); return false; }
+  sessionStorage.setItem('admin-unlocked', '1');
+  return true;
+}
+function normalizeName(s){ return String(s).trim().toLowerCase().replace(/\s+/g,' '); }
+
+function setStatus(id, msg, cls){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.textContent = msg;
+  el.className = 'status ' + (cls||'');
+  if(msg){ setTimeout(()=>{ if(el.textContent===msg) el.textContent=''; }, 5000); }
+}
+
+function setConnLed(state){
+  const dot = document.getElementById('connLed');
+  if(!dot) return;
+  dot.className = 'led-pill led-' + state;
+  const labels = { checking:'Conectando…', ok:'Conectado — se guarda en la nube', local:'Falta configurar la conexión', error:'Sin conexión — revisa tu internet' };
+  dot.title = labels[state] || '';
+}
+
+function statusOf(it){
+  if(it.qty <= it.min) return 'low';
+  if(it.qty <= it.min * 1.3) return 'warn';
+  return 'ok';
+}
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ================== Carga inicial ==================
+async function loadAll(){
+  if(!SUPABASE_URL.startsWith('https://') || SUPABASE_ANON_KEY==='PEGA_AQUI_TU_ANON_KEY'){
+    setConnLed('local');
+    return;
+  }
+  setConnLed('checking');
+  try{
+    const [prod, perm, dest, sched, tron] = await Promise.all([
+      sb.from('productos').select('*').order('grupo').order('nombre'),
+      sb.from('productos_permitidos').select('*').order('grupo').order('etiqueta'),
+      sb.from('destinatarios').select('*'),
+      sb.from('alertas_programadas').select('*').order('dia_semana').order('hora'),
+      sb.from('troncal_entregas').select('*').order('fecha', {ascending:false})
+    ]);
+    if(prod.error) throw prod.error;
+    items = (prod.data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+    permitidos = (perm.data||[]).map(r=>({id:r.id, nombre:r.nombre_exacto, etiqueta:r.etiqueta, min:Number(r.minimo_defecto), grupo:r.grupo}));
+    recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[]}));
+    schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo}));
+    troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion}));
+    setConnLed('ok');
+  }catch(e){
+    console.error(e);
+    setConnLed('error');
+  }
+  render();
+  renderPermitidos();
+  renderRecipients();
+  renderSchedules();
+  renderTroncal();
+}
+
+let realtimeDebounce = null;
+
+function subscribeRealtime(){
+  if(!SUPABASE_URL.startsWith('https://')) return;
+  sb.channel('productos-realtime')
+    .on('postgres_changes', {event:'*', schema:'public', table:'productos'}, ()=>{
+      // Espera un momento por si llegan varios cambios seguidos, y solo
+      // vuelve a pedir la tabla de productos (no las otras 3 tablas).
+      clearTimeout(realtimeDebounce);
+      realtimeDebounce = setTimeout(reloadProductosOnly, 600);
+    })
+    .subscribe();
+}
+
+async function reloadProductosOnly(){
+  try{
+    const {data, error} = await sb.from('productos').select('*').order('grupo').order('nombre');
+    if(error) throw error;
+    items = (data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+    render();
+    setConnLed('ok');
+  }catch(e){
+    console.error(e);
+    setConnLed('error');
+  }
+}
+
+// ================== Inventario ==================
+function render(){
+  const admin = isAdmin();
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  items.forEach(it=>{
+    const st = statusOf(it);
+    const tr = document.createElement('tr');
+    tr.className = st==='low' ? 'low' : (st==='warn' ? 'warn' : '');
+    const dis = admin ? '' : 'disabled';
+    tr.innerHTML = `
+      <td class="name-cell" data-label="Material">
+        <input type="text" value="${escapeHtml(it.name)}" ${dis} data-field="name" data-id="${it.id}" style="border:none;background:transparent;font-weight:600;padding:2px;width:70%;">
+      </td>
+      <td style="text-align:right;" data-label="Cantidad"><input class="qty" type="number" min="0" value="${it.qty}" ${dis} data-field="qty" data-id="${it.id}"></td>
+      <td style="text-align:right;" data-label="Mínimo"><input class="minv" type="number" min="0" value="${it.min}" ${dis} data-field="min" data-id="${it.id}"></td>
+      <td data-label="Estado"><span class="badge ${st==='low'?'low':st==='warn'?'warn':'ok'}">${st==='low'?'Agotado':st==='warn'?'Por acabarse':'Ok'}</span></td>
+      <td data-label="">${admin ? `<button class="del" data-id="${it.id}" title="Eliminar">✕</button>` : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  if(admin){
+    tbody.querySelectorAll('input').forEach(inp=>{
+      inp.addEventListener('change', async (e)=>{
+        const id = e.target.dataset.id;
+        const field = e.target.dataset.field;
+        const it = items.find(x=>x.id===id);
+        if(!it) return;
+        it[field] = (field==='qty'||field==='min') ? (parseFloat(e.target.value)||0) : e.target.value;
+        await saveItem(it);
+      });
+    });
+
+    tbody.querySelectorAll('.del').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const it = items.find(x=>x.id===btn.dataset.id);
+        if(!it) return;
+        items = items.filter(x=>x.id!==it.id);
+        render();
+        try{ await sb.from('productos').delete().eq('id', it.id); }catch(e){}
+      });
+    });
+  }
+
+  document.getElementById('invActions').style.display = admin ? '' : 'none';
+  document.getElementById('invEditBtn').textContent = admin ? '🔓 Editando' : '🔒 Editar';
+
+  renderSummary();
+}
+
+async function saveItem(it){
+  try{
+    const payload = { nombre: it.name, cantidad: it.qty, minimo: it.min, grupo: it.grupo || 'General' };
+    if(it.id && it.id.length===36) payload.id = it.id;
+    const {data, error} = await sb.from('productos').upsert(payload, {onConflict:'nombre'}).select().single();
+    if(error) throw error;
+    it.id = data.id; // asegura que el objeto local quede con el id real de Supabase
+    setConnLed('ok');
+  }catch(e){
+    console.error(e);
+    setConnLed('error');
+  }
+}
+
+function renderSummary(){
+  const low = items.filter(it=>statusOf(it)==='low').length;
+  const warn = items.filter(it=>statusOf(it)==='warn').length;
+  const ok = items.length - low - warn;
+  document.getElementById('summary').innerHTML = `
+    <div class="metric low"><div class="n" style="color:var(--red)">${low}</div><div class="l">Agotado</div></div>
+    <div class="metric warn"><div class="n" style="color:var(--amber)">${warn}</div><div class="l">Por acabarse</div></div>
+    <div class="metric ok"><div class="n" style="color:var(--apc-green)">${ok}</div><div class="l">En buen nivel</div></div>
+  `;
+}
+
+document.getElementById('invEditBtn').addEventListener('click', ()=>{
+  if(isAdmin()){ render(); return; } // ya admin, nada que pedir
+  if(requireAdmin()) render();
+});
+
+document.getElementById('addRowBtn').addEventListener('click', async ()=>{
+  const it = {id:uid(), name:'Nuevo material', qty:0, min:5, grupo:'General'};
+  items.push(it);
+  render();
+  await saveItem(it);
+  render();
+});
+
+document.getElementById('cleanBtn').addEventListener('click', async ()=>{
+  const permitidosSet = new Set(permitidos.map(p=>normalizeName(p.nombre)));
+  const antes = items.length;
+  const aBorrar = items.filter(it=>!permitidosSet.has(normalizeName(it.name)));
+  items = items.filter(it=>permitidosSet.has(normalizeName(it.name)));
+  render();
+  for(const it of aBorrar){ try{ await sb.from('productos').delete().eq('id', it.id); }catch(e){} }
+  setStatus('uploadStatus', aBorrar.length ? `Se quitaron ${aBorrar.length} producto(s) que no están en la lista permitida.` : 'No había productos fuera de la lista.', 'ok');
+});
+
+document.getElementById('dedupBtn').addEventListener('click', async ()=>{
+  const groups = {};
+  items.forEach(it=>{
+    const key = normalizeName(it.name);
+    (groups[key] = groups[key]||[]).push(it);
+  });
+  const dupGroups = Object.values(groups).filter(g=>g.length>1);
+  if(!dupGroups.length){ setStatus('uploadStatus','No se encontraron productos duplicados.','ok'); return; }
+  const resumen = dupGroups.map(g=>`- ${g[0].name} (${g.length} filas -> ${g.reduce((s,x)=>s+(x.qty||0),0)})`).join('\n');
+  if(!confirm(`Se encontraron ${dupGroups.length} duplicado(s):\n\n${resumen}\n\n¿Unir en una sola fila por producto?`)) return;
+
+  const merged = [];
+  const aBorrar = [];
+  Object.values(groups).forEach(g=>{
+    if(g.length===1){ merged.push(g[0]); return; }
+    merged.push({id:g[0].id, name:g[0].name, qty:g.reduce((s,x)=>s+(x.qty||0),0), min:Math.max(...g.map(x=>x.min||0)), grupo:g[0].grupo});
+    aBorrar.push(...g.slice(1));
+  });
+  items = merged;
+  render();
+  for(const it of merged){ await saveItem(it); }
+  for(const it of aBorrar){ try{ await sb.from('productos').delete().eq('id', it.id); }catch(e){} }
+  setStatus('uploadStatus', `Se unieron ${dupGroups.length} producto(s) duplicado(s).`, 'ok');
+});
+
+document.getElementById('resetBtn').addEventListener('click', async ()=>{
+  if(!confirm('Esto borra TODO el inventario. ¿Seguro?')) return;
+  const toDelete = items.map(it=>it.id);
+  items = [];
+  render();
+  for(const id of toDelete){ try{ await sb.from('productos').delete().eq('id', id); }catch(e){} }
+  setStatus('uploadStatus', 'Inventario vaciado.', 'ok');
+});
+
+// ================== Carga de Excel ==================
+function matchPermitido(name){
+  const n = normalizeName(name);
+  return permitidos.find(p => normalizeName(p.nombre) === n) || null;
+}
+
+function findCol(headers, keywords){
+  for(let i=0;i<headers.length;i++){
+    const h = String(headers[i]||'').toLowerCase();
+    if(keywords.some(k=>h.includes(k))) return i;
+  }
+  return -1;
+}
+
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+uploadZone.addEventListener('click', ()=>fileInput.click());
+uploadZone.addEventListener('dragover', (e)=>{e.preventDefault(); uploadZone.style.borderColor='var(--cyan)';});
+uploadZone.addEventListener('dragleave', ()=>{uploadZone.style.borderColor='var(--line)';});
+uploadZone.addEventListener('drop', (e)=>{
+  e.preventDefault();
+  uploadZone.style.borderColor='var(--line)';
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', (e)=>{ if(e.target.files.length) handleFile(e.target.files[0]); });
+
+function handleFile(file){
+  const reader = new FileReader();
+  reader.onload = async (e)=>{
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      if(!rows.length){ setStatus('uploadStatus','El archivo está vacío.','err'); return; }
+
+      const headers = rows[0];
+      let nameCol = findCol(headers, ['producto','material','nombre','item','descripcion']);
+      let qtyCol = findCol(headers, ['existencias','cantidad','stock']);
+      if(nameCol===-1) nameCol = 0;
+      if(qtyCol===-1) qtyCol = 1;
+
+      const sums = {};
+      for(let i=1;i<rows.length;i++){
+        const r = rows[i];
+        const name = String(r[nameCol]||'').trim();
+        if(!name) continue;
+        const qty = parseFloat(r[qtyCol]);
+        sums[name] = (sums[name]||0) + (isNaN(qty)?0:qty);
+      }
+
+      let importados = 0, ignorados = 0;
+      for(const name of Object.keys(sums)){
+        const perm = matchPermitido(name);
+        if(!perm){ ignorados++; continue; }
+        importados++;
+        const qty = sums[name];
+        const existing = items.find(it=>normalizeName(it.name)===normalizeName(name));
+        if(existing){
+          existing.qty = qty;
+          await saveItem(existing);
+        } else {
+          const it = {id:uid(), name: perm.etiqueta || name, qty, min: perm.min, grupo: perm.grupo};
+          items.push(it);
+          await saveItem(it);
+        }
+      }
+
+      if(!importados){
+        setStatus('uploadStatus','No se encontró ningún producto de tu lista permitida en este archivo. Revisa el panel admin.','err');
+        return;
+      }
+
+      render();
+      setStatus('uploadStatus', `Se importaron ${importados} producto(s). Se ignoraron ${ignorados} que no están en la lista permitida.`, 'ok');
+    }catch(err){
+      console.error(err);
+      setStatus('uploadStatus', 'No se pudo leer el archivo. Revisa que sea un Excel o CSV válido.', 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ================== Productos permitidos (panel admin) ==================
+function renderPermitidos(){
+  const tbody = document.getElementById('permitidosTbody');
+  tbody.innerHTML = '';
+  permitidos.forEach(p=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td data-label="Nombre exacto"><input type="text" value="${escapeHtml(p.nombre)}" data-pfield="nombre" data-pid="${p.id}" style="width:100%;font-family:var(--mono);"></td>
+      <td style="text-align:right;" data-label="Mínimo"><input class="minv" type="number" min="0" value="${p.min}" data-pfield="min" data-pid="${p.id}"></td>
+      <td data-label="Grupo">
+        <select data-pfield="grupo" data-pid="${p.id}">
+          <option value="General" ${p.grupo==='General'?'selected':''}>General</option>
+          <option value="Troncal" ${p.grupo==='Troncal'?'selected':''}>Troncal</option>
+        </select>
+      </td>
+      <td data-label=""><button class="del" data-remove-permitido="${p.id}">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('[data-pfield]').forEach(inp=>{
+    inp.addEventListener('change', async (e)=>{
+      const p = permitidos.find(x=>x.id===e.target.dataset.pid);
+      if(!p) return;
+      const field = e.target.dataset.pfield;
+      p[field] = field==='min' ? (parseFloat(e.target.value)||0) : e.target.value;
+      if(field==='nombre') p.etiqueta = p.nombre;
+      await savePermitido(p);
+    });
+  });
+
+  tbody.querySelectorAll('[data-remove-permitido]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.removePermitido;
+      permitidos = permitidos.filter(x=>x.id!==id);
+      renderPermitidos();
+      try{ await sb.from('productos_permitidos').delete().eq('id', id); }catch(e){}
+    });
+  });
+}
+
+async function savePermitido(p){
+  try{
+    const payload = { nombre_exacto: p.nombre, etiqueta: p.etiqueta || p.nombre, minimo_defecto: p.min, grupo: p.grupo };
+    if(p.id && p.id.length===36) payload.id = p.id;
+    const {data, error} = await sb.from('productos_permitidos').upsert(payload, {onConflict:'nombre_exacto'}).select().single();
+    if(error) throw error;
+    p.id = data.id;
+  }catch(e){ console.error(e); }
+}
+
+document.getElementById('addPermitidoBtn').addEventListener('click', async ()=>{
+  const p = {id:uid(), nombre:'', etiqueta:'', min:10, grupo:'General'};
+  permitidos.push(p);
+  renderPermitidos();
+});
+
+document.getElementById('bulkAddBtn').addEventListener('click', async ()=>{
+  const raw = document.getElementById('bulkNames').value;
+  const min = parseFloat(document.getElementById('bulkMin').value) || 10;
+  const grupo = document.getElementById('bulkGroup').value;
+  const nombres = raw.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!nombres.length){ setStatus('permitidosStatus','Pega al menos un nombre.','err'); return; }
+
+  let agregados = 0;
+  for(const nombre of nombres){
+    if(permitidos.some(p=>normalizeName(p.nombre)===normalizeName(nombre))) continue;
+    const p = {id:uid(), nombre, etiqueta:nombre, min, grupo};
+    permitidos.push(p);
+    await savePermitido(p);
+    agregados++;
+  }
+  renderPermitidos();
+  document.getElementById('bulkNames').value = '';
+  setStatus('permitidosStatus', `Se agregaron ${agregados} producto(s) permitido(s).`, 'ok');
+});
+
+// ================== Destinatarios ==================
+function renderRecipients(){
+  const box = document.getElementById('recipientsList');
+  if(!recipients.length){ box.innerHTML = '<span class="note" style="margin:0;">No hay destinatarios.</span>'; return; }
+  box.innerHTML = recipients.map(r=>`
+    <span class="badge ok" style="margin:2px 6px 2px 0;display:inline-flex;align-items:center;gap:6px;">
+      ${escapeHtml(r.nombre || r.chatId)} (${r.grupos.join(', ')})
+      <button class="del" data-remove-chat="${r.id}" style="padding:0;font-size:13px;">✕</button>
+    </span>
+  `).join('');
+  box.querySelectorAll('[data-remove-chat]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.removeChat;
+      recipients = recipients.filter(r=>r.id!==id);
+      renderRecipients();
+      try{ await sb.from('destinatarios').delete().eq('id', id); }catch(e){}
+    });
+  });
+}
+
+document.getElementById('addRecipientBtn').addEventListener('click', async ()=>{
+  const chatId = document.getElementById('newChatId').value.trim();
+  const nombre = document.getElementById('newChatName').value.trim();
+  const grupos = document.getElementById('newChatGroups').value.split(',');
+  if(!chatId || !/^-?\d+$/.test(chatId)){ setStatus('recipientsStatus','Escribe un chat_id válido.','err'); return; }
+  if(recipients.some(r=>r.chatId===chatId)){ setStatus('recipientsStatus','Ese chat_id ya está agregado.','err'); return; }
+  try{
+    const {data, error} = await sb.from('destinatarios').insert({chat_id:chatId, nombre, grupos}).select().single();
+    if(error) throw error;
+    recipients.push({id:data.id, chatId:data.chat_id, nombre:data.nombre, grupos:data.grupos});
+    renderRecipients();
+    document.getElementById('newChatId').value = '';
+    document.getElementById('newChatName').value = '';
+    setStatus('recipientsStatus','Destinatario agregado.','ok');
+  }catch(e){
+    setStatus('recipientsStatus','No se pudo guardar: ' + e.message, 'err');
+  }
+});
+
+// ================== Reporte manual ==================
+async function enviarReporte(grupo){
+  setStatus('alertStatus', 'Enviando...', '');
+  try{
+    const {error} = await sb.rpc('enviar_reporte_manual', {grupo_filtro: grupo});
+    if(error) throw error;
+    setStatus('alertStatus', 'Reporte enviado a Telegram.', 'ok');
+  }catch(e){
+    setStatus('alertStatus', 'Error: ' + e.message, 'err');
+  }
+}
+document.getElementById('sendAllBtn').addEventListener('click', ()=>enviarReporte(null));
+document.getElementById('sendGeneralBtn').addEventListener('click', ()=>enviarReporte('General'));
+document.getElementById('sendTroncalBtn').addEventListener('click', ()=>enviarReporte('Troncal'));
+
+// ================== Alerta programada ==================
+const DIAS = {0:'Domingo',1:'Lunes',2:'Martes',3:'Miércoles',4:'Jueves',5:'Viernes',6:'Sábado'};
+
+function renderSchedules(){
+  const box = document.getElementById('scheduleList');
+  if(!schedules.length){ box.innerHTML = '<span class="note" style="margin:0;">No hay alertas programadas todavía.</span>'; return; }
+  box.innerHTML = schedules.map(s=>`
+    <span class="badge ${s.activo?'ok':'warn'}" style="margin:3px 6px 3px 0;display:inline-flex;align-items:center;gap:6px;">
+      ${DIAS[s.dia]} ${String(s.hora).padStart(2,'0')}:${String(s.minuto).padStart(2,'0')}
+      <button class="del" data-remove-sched="${s.id}" style="padding:0;font-size:13px;">✕</button>
+    </span>
+  `).join('');
+  box.querySelectorAll('[data-remove-sched]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.removeSched;
+      schedules = schedules.filter(s=>s.id!==id);
+      renderSchedules();
+      try{ await sb.from('alertas_programadas').delete().eq('id', id); }catch(e){}
+    });
+  });
+}
+
+document.getElementById('addScheduleBtn').addEventListener('click', async ()=>{
+  const dia = parseInt(document.getElementById('schDay').value);
+  const hora = parseInt(document.getElementById('schHour').value);
+  const minuto = parseInt(document.getElementById('schMin').value) || 0;
+  try{
+    const {data, error} = await sb.from('alertas_programadas').insert({dia_semana:dia, hora, minuto, activo:true}).select().single();
+    if(error) throw error;
+    schedules.push({id:data.id, dia:data.dia_semana, hora:data.hora, minuto:data.minuto, activo:data.activo});
+    renderSchedules();
+    setStatus('scheduleStatus', 'Alerta programada. Se revisa cada 5 min en el servidor.', 'ok');
+  }catch(e){
+    setStatus('scheduleStatus', 'Error: ' + e.message, 'err');
+  }
+});
+
+// ================== Troncal (registro de entregas) ==================
+function renderTroncal(){
+  const admin = isAdmin();
+  const tbody = document.getElementById('troncalTbody');
+  tbody.innerHTML = '';
+  troncalEntries.forEach(en=>{
+    const tr = document.createElement('tr');
+    const dis = admin ? '' : 'disabled';
+    tr.innerHTML = `
+      <td data-label="Material"><input type="text" value="${escapeHtml(en.material||'')}" ${dis} data-tfield="material" data-tid="${en.id}" style="width:100%;"></td>
+      <td style="text-align:right;" data-label="Metros"><input type="number" min="0" value="${en.metros}" ${dis} data-tfield="metros" data-tid="${en.id}" style="width:90px;text-align:right;"></td>
+      <td data-label="Entregado a"><input type="text" value="${escapeHtml(en.entregadoA||'')}" ${dis} data-tfield="entregadoA" data-tid="${en.id}" style="width:100%;"></td>
+      <td data-label="Fecha"><input type="date" value="${en.fecha||''}" ${dis} data-tfield="fecha" data-tid="${en.id}"></td>
+      <td data-label="Observación"><input type="text" value="${escapeHtml(en.observacion||'')}" ${dis} data-tfield="observacion" data-tid="${en.id}" style="width:100%;"></td>
+      <td data-label="">${admin ? `<button class="del" data-remove-troncal="${en.id}" title="Eliminar">✕</button>` : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  if(admin){
+    tbody.querySelectorAll('[data-tfield]').forEach(inp=>{
+      inp.addEventListener('change', async (e)=>{
+        const en = troncalEntries.find(x=>x.id===e.target.dataset.tid);
+        if(!en) return;
+        const field = e.target.dataset.tfield;
+        en[field] = field==='metros' ? (parseFloat(e.target.value)||0) : e.target.value;
+        await saveTroncal(en);
+      });
+    });
+    tbody.querySelectorAll('[data-remove-troncal]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.removeTroncal;
+        troncalEntries = troncalEntries.filter(x=>x.id!==id);
+        renderTroncal();
+        try{ await sb.from('troncal_entregas').delete().eq('id', id); }catch(e){}
+      });
+    });
+  }
+
+  document.getElementById('troncalActions').style.display = admin ? '' : 'none';
+  document.getElementById('troncalEditBtn').textContent = admin ? '🔓 Editando' : '🔒 Editar';
+}
+
+async function saveTroncal(en){
+  try{
+    const payload = {
+      material: en.material || '', metros: en.metros || 0,
+      entregado_a: en.entregadoA || null, fecha: en.fecha || new Date().toISOString().slice(0,10),
+      observacion: en.observacion || null
+    };
+    if(en.id && en.id.length===36) payload.id = en.id;
+    const {data, error} = await sb.from('troncal_entregas').upsert(payload).select().single();
+    if(error) throw error;
+    en.id = data.id;
+  }catch(e){ console.error(e); }
+}
+
+document.getElementById('troncalEditBtn').addEventListener('click', ()=>{
+  if(isAdmin()){ renderTroncal(); return; }
+  if(requireAdmin()) renderTroncal();
+});
+
+document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
+  const en = {id:uid(), material:'Cable troncal', metros:0, entregadoA:'', fecha:new Date().toISOString().slice(0,10), observacion:''};
+  troncalEntries.unshift(en);
+  renderTroncal();
+  await saveTroncal(en);
+  renderTroncal();
+});
+
+// ================== Navegación por pestañas + panel admin oculto ==================
+function switchTab(name){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  document.querySelectorAll('.tab-panel').forEach(p=>{
+    p.style.display = (p.dataset.panel===name) ? '' : 'none';
+  });
+  window.scrollTo({top:0, behavior:'instant'});
+}
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>switchTab(btn.dataset.tab));
+});
+
+document.getElementById('adminGearBtn').addEventListener('click', ()=>{
+  if(!requireAdmin()) return;
+  render();
+  renderTroncal();
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>{ p.style.display = (p.dataset.panel==='admin') ? '' : 'none'; });
+  window.scrollTo({top:0, behavior:'instant'});
+});
+
+document.getElementById('adminBackBtn').addEventListener('click', ()=>switchTab('inventario'));
+
+// ================== Arranque ==================
+loadAll();
+subscribeRealtime();
+
+</script>
+</body>
+</html>
