@@ -368,7 +368,7 @@
           <span>Registro de entregas — Troncal</span>
           <button id="troncalEditBtn" style="font-size:11px;padding:6px 11px;">🔒 Editar</button>
         </h2>
-        <p class="note">Registro de cable de fibra troncal entregado: cuánto, a quién y cuándo. No maneja mínimos ni alertas, es solo una bitácora.</p>
+        <p class="note">Registro de cable de fibra troncal entregado: cuánto, a quién, cuándo y cuánto se devuelve. No maneja mínimos ni alertas, es solo una bitácora.</p>
         <table>
           <thead>
             <tr>
@@ -376,6 +376,7 @@
               <th style="text-align:right;">Metros</th>
               <th>Entregado a</th>
               <th>Fecha</th>
+              <th style="text-align:right;">Devuelto</th>
               <th>Observación</th>
               <th></th>
             </tr>
@@ -385,6 +386,16 @@
         <div class="footer-actions" id="troncalActions" style="display:none;">
           <button id="addTroncalBtn">+ Agregar entrega</button>
         </div>
+      </div>
+
+      <div class="card" id="troncalBulkCard" style="display:none;">
+        <h2>Agregar varios materiales de una vez</h2>
+        <p class="note">Pega un nombre de material/cable por línea. Se crea una fila por cada uno (metros, técnico, fecha y observación quedan en blanco para completar después, uno por uno). No lleva mínimo, eso no aplica aquí.</p>
+        <textarea id="troncalBulkNames" placeholder="Cable ADSS 24 hilos&#10;Cable ADSS 48 hilos&#10;Cable ADSS 96 hilos"></textarea>
+        <div class="row" style="margin-top:10px;">
+          <button class="primary" id="troncalBulkAddBtn">Agregar todos</button>
+        </div>
+        <div class="status" id="troncalBulkStatus"></div>
       </div>
 
       <div class="card">
@@ -595,7 +606,7 @@ async function loadAll(){
     permitidos = (perm.data||[]).map(r=>({id:r.id, nombre:r.nombre_exacto, etiqueta:r.etiqueta, min:Number(r.minimo_defecto), grupo:r.grupo}));
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[]}));
     schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo}));
-    troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion}));
+    troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0)}));
     setConnLed('ok');
   }catch(e){
     console.error(e);
@@ -1037,6 +1048,7 @@ function renderTroncal(){
       <td style="text-align:right;" data-label="Metros"><input type="number" min="0" value="${en.metros}" ${dis} data-tfield="metros" data-tid="${en.id}" style="width:90px;text-align:right;"></td>
       <td data-label="Entregado a"><input type="text" value="${escapeHtml(en.entregadoA||'')}" ${dis} data-tfield="entregadoA" data-tid="${en.id}" style="width:100%;"></td>
       <td data-label="Fecha"><input type="date" value="${en.fecha||''}" ${dis} data-tfield="fecha" data-tid="${en.id}"></td>
+      <td style="text-align:right;" data-label="Devuelto"><input type="number" min="0" value="${en.devuelto||0}" ${dis} data-tfield="devuelto" data-tid="${en.id}" style="width:80px;text-align:right;"></td>
       <td data-label="Observación"><input type="text" value="${escapeHtml(en.observacion||'')}" ${dis} data-tfield="observacion" data-tid="${en.id}" style="width:100%;"></td>
       <td data-label="">${editable ? `<button class="del" data-remove-troncal="${en.id}" title="Eliminar">✕</button>` : ''}</td>
     `;
@@ -1049,7 +1061,7 @@ function renderTroncal(){
         const en = troncalEntries.find(x=>x.id===e.target.dataset.tid);
         if(!en) return;
         const field = e.target.dataset.tfield;
-        en[field] = field==='metros' ? (parseFloat(e.target.value)||0) : e.target.value;
+        en[field] = (field==='metros'||field==='devuelto') ? (parseFloat(e.target.value)||0) : e.target.value;
         await saveTroncal(en);
       });
     });
@@ -1064,6 +1076,7 @@ function renderTroncal(){
   }
 
   document.getElementById('troncalActions').style.display = editable ? '' : 'none';
+  document.getElementById('troncalBulkCard').style.display = editable ? '' : 'none';
   document.getElementById('troncalEditBtn').textContent = editable ? '✔ Guardar y cerrar' : '🔒 Editar';
 }
 
@@ -1072,6 +1085,7 @@ async function saveTroncal(en){
     const payload = {
       material: en.material || '', metros: en.metros || 0,
       entregado_a: en.entregadoA || null, fecha: en.fecha || new Date().toISOString().slice(0,10),
+      devuelto: en.devuelto || 0,
       observacion: en.observacion || null
     };
     if(en.id && en.id.length===36) payload.id = en.id;
@@ -1107,6 +1121,7 @@ document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
     metros: 0,
     entregadoA: tecnico.trim(),
     fecha: fechaInput.trim() || hoy,
+    devuelto: 0,
     observacion: ''
   };
   troncalEntries.unshift(en);
@@ -1114,6 +1129,24 @@ document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
   await saveTroncal(en);
   renderTroncal();
   setStatus('troncalAlertStatus', 'Entrega agregada. Puedes editar material, metros u observación directo en la fila.', 'ok');
+});
+
+document.getElementById('troncalBulkAddBtn').addEventListener('click', async ()=>{
+  const raw = document.getElementById('troncalBulkNames').value;
+  const nombres = raw.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!nombres.length){ setStatus('troncalBulkStatus','Pega al menos un nombre de material.','err'); return; }
+
+  const hoy = new Date().toISOString().slice(0,10);
+  let agregados = 0;
+  for(const material of nombres){
+    const en = {id:uid(), material, metros:0, entregadoA:'', fecha:hoy, devuelto:0, observacion:''};
+    troncalEntries.unshift(en);
+    await saveTroncal(en);
+    agregados++;
+  }
+  renderTroncal();
+  document.getElementById('troncalBulkNames').value = '';
+  setStatus('troncalBulkStatus', `Se agregaron ${agregados} entrada(s). Completa técnico, metros y fecha directo en cada fila.`, 'ok');
 });
 
 document.getElementById('sendTroncalLogBtn').addEventListener('click', async ()=>{
