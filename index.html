@@ -369,6 +369,9 @@
           <button id="troncalEditBtn" style="font-size:11px;padding:6px 11px;">🔒 Editar</button>
         </h2>
         <p class="note">Registro de cable de fibra troncal entregado: cuánto, a quién, cuándo y cuánto se devuelve. No maneja mínimos ni alertas, es solo una bitácora.</p>
+        <div class="field" style="margin-bottom:12px;">
+          <input type="text" id="troncalSearch" placeholder="Buscar material… ej: 12 hilos, 24h, spam 400">
+        </div>
         <table>
           <thead>
             <tr>
@@ -1035,12 +1038,15 @@ document.getElementById('addScheduleBtn').addEventListener('click', async ()=>{
 
 // ================== Troncal (registro de entregas) ==================
 let troncalEditing = false;
+let troncalSearch = '';
 
 function renderTroncal(){
   const editable = isAdmin() && troncalEditing;
   const tbody = document.getElementById('troncalTbody');
   tbody.innerHTML = '';
-  troncalEntries.forEach(en=>{
+  const q = normalizeName(troncalSearch);
+  const visibles = q ? troncalEntries.filter(en => normalizeName(en.material||'').includes(q)) : troncalEntries;
+  visibles.forEach(en=>{
     const tr = document.createElement('tr');
     const dis = editable ? '' : 'disabled';
     tr.innerHTML = `
@@ -1094,6 +1100,11 @@ async function saveTroncal(en){
     en.id = data.id;
   }catch(e){ console.error(e); }
 }
+
+document.getElementById('troncalSearch').addEventListener('input', (e)=>{
+  troncalSearch = e.target.value;
+  renderTroncal();
+});
 
 document.getElementById('troncalEditBtn').addEventListener('click', ()=>{
   if(troncalEditing){
