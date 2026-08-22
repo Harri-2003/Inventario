@@ -459,7 +459,6 @@
             <tr>
               <th>Nombre exacto (como aparece en tu Excel)</th>
               <th style="text-align:right;">Mínimo</th>
-              <th>Grupo</th>
               <th></th>
             </tr>
           </thead>
@@ -473,19 +472,12 @@
 
       <div class="card">
         <h2>Agregar varios de una vez</h2>
-        <p class="note">Pega un nombre de producto exacto por línea. Se agregan todos con el mismo mínimo y grupo (los puedes ajustar después uno por uno).</p>
+        <p class="note">Pega un nombre de producto exacto por línea (para el inventario General). Se agregan todos con el mismo mínimo, y los puedes ajustar después uno por uno.</p>
         <textarea id="bulkNames" placeholder="Amarra Plástica Blanca 10 Cm&#10;Amarra Plástica Blanca 25 Cm&#10;Amarra Plástica Negra 10 Cm"></textarea>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:140px;">
             <label>Mínimo</label>
             <input type="number" id="bulkMin" value="10">
-          </div>
-          <div class="field" style="max-width:160px;">
-            <label>Grupo</label>
-            <select id="bulkGroup">
-              <option value="General">General</option>
-              <option value="Troncal">Troncal</option>
-            </select>
           </div>
           <button class="primary" id="bulkAddBtn">Agregar todos</button>
         </div>
@@ -722,7 +714,13 @@ function renderSummary(){
 }
 
 document.getElementById('invEditBtn').addEventListener('click', ()=>{
-  if(invEditing){ invEditing = false; render(); setStatus('uploadStatus','Cambios guardados. Edición cerrada.','ok'); return; }
+  if(invEditing){
+    invEditing = false;
+    sessionStorage.removeItem('admin-unlocked'); // pide la clave de nuevo la próxima vez
+    render();
+    setStatus('uploadStatus','Cambios guardados. Edición cerrada.','ok');
+    return;
+  }
   if(!requireAdmin()) return;
   invEditing = true;
   render();
@@ -872,12 +870,6 @@ function renderPermitidos(){
     tr.innerHTML = `
       <td data-label="Nombre exacto"><input type="text" value="${escapeHtml(p.nombre)}" data-pfield="nombre" data-pid="${p.id}" style="width:100%;font-family:var(--mono);"></td>
       <td style="text-align:right;" data-label="Mínimo"><input class="minv" type="number" min="0" value="${p.min}" data-pfield="min" data-pid="${p.id}"></td>
-      <td data-label="Grupo">
-        <select data-pfield="grupo" data-pid="${p.id}">
-          <option value="General" ${p.grupo==='General'?'selected':''}>General</option>
-          <option value="Troncal" ${p.grupo==='Troncal'?'selected':''}>Troncal</option>
-        </select>
-      </td>
       <td data-label=""><button class="del" data-remove-permitido="${p.id}">✕</button></td>
     `;
     tbody.appendChild(tr);
@@ -923,7 +915,7 @@ document.getElementById('addPermitidoBtn').addEventListener('click', async ()=>{
 document.getElementById('bulkAddBtn').addEventListener('click', async ()=>{
   const raw = document.getElementById('bulkNames').value;
   const min = parseFloat(document.getElementById('bulkMin').value) || 10;
-  const grupo = document.getElementById('bulkGroup').value;
+  const grupo = 'General';
   const nombres = raw.split('\n').map(s=>s.trim()).filter(Boolean);
   if(!nombres.length){ setStatus('permitidosStatus','Pega al menos un nombre.','err'); return; }
 
@@ -1090,7 +1082,13 @@ async function saveTroncal(en){
 }
 
 document.getElementById('troncalEditBtn').addEventListener('click', ()=>{
-  if(troncalEditing){ troncalEditing = false; renderTroncal(); return; }
+  if(troncalEditing){
+    troncalEditing = false;
+    sessionStorage.removeItem('admin-unlocked'); // pide la clave de nuevo la próxima vez
+    renderTroncal();
+    setStatus('troncalAlertStatus','Cambios guardados. Edición cerrada.','ok');
+    return;
+  }
   if(!requireAdmin()) return;
   troncalEditing = true;
   renderTroncal();
