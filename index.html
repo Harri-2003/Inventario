@@ -386,6 +386,13 @@
           <button id="addTroncalBtn">+ Agregar entrega</button>
         </div>
       </div>
+
+      <div class="card">
+        <h2>Reporte manual</h2>
+        <p class="note">Envía por Telegram el registro completo de entregas (todo, no hay concepto de agotado aquí). Solo le llega a quien tenga el grupo "Troncal" marcado.</p>
+        <button class="primary" id="sendTroncalLogBtn">Enviar registro completo</button>
+        <div class="status" id="troncalAlertStatus"></div>
+      </div>
     </section>
 
     <section class="tab-panel" data-panel="alertas" style="display:none">
@@ -425,11 +432,10 @@
 
       <div class="card">
         <h2>Reporte manual</h2>
-        <p class="note">Recibe por Telegram el estado completo del stock actual, cuando quieras.</p>
+        <p class="note">Envía por Telegram, cuando quieras, sin esperar a que algo cruce el mínimo.</p>
         <div class="row">
-          <button class="primary" id="sendAllBtn">Enviar todo</button>
-          <button id="sendGeneralBtn">Solo General</button>
-          <button id="sendTroncalBtn">Solo Troncal</button>
+          <button class="primary" id="sendLowBtn">🔴 Solo agotados y por acabarse</button>
+          <button id="sendAllBtn">Stock completo</button>
         </div>
         <div class="status" id="alertStatus"></div>
       </div>
@@ -638,15 +644,17 @@ async function reloadProductosOnly(){
 }
 
 // ================== Inventario ==================
+let invEditing = false;
+
 function render(){
-  const admin = isAdmin();
+  const editable = isAdmin() && invEditing;
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
   items.forEach(it=>{
     const st = statusOf(it);
     const tr = document.createElement('tr');
     tr.className = st==='low' ? 'low' : (st==='warn' ? 'warn' : '');
-    const dis = admin ? '' : 'disabled';
+    const dis = editable ? '' : 'disabled';
     tr.innerHTML = `
       <td class="name-cell" data-label="Material">
         <input type="text" value="${escapeHtml(it.name)}" ${dis} data-field="name" data-id="${it.id}" style="border:none;background:transparent;font-weight:600;padding:2px;width:70%;">
@@ -654,12 +662,12 @@ function render(){
       <td style="text-align:right;" data-label="Cantidad"><input class="qty" type="number" min="0" value="${it.qty}" ${dis} data-field="qty" data-id="${it.id}"></td>
       <td style="text-align:right;" data-label="Mínimo"><input class="minv" type="number" min="0" value="${it.min}" ${dis} data-field="min" data-id="${it.id}"></td>
       <td data-label="Estado"><span class="badge ${st==='low'?'low':st==='warn'?'warn':'ok'}">${st==='low'?'Agotado':st==='warn'?'Por acabarse':'Ok'}</span></td>
-      <td data-label="">${admin ? `<button class="del" data-id="${it.id}" title="Eliminar">✕</button>` : ''}</td>
+      <td data-label="">${editable ? `<button class="del" data-id="${it.id}" title="Eliminar">✕</button>` : ''}</td>
     `;
     tbody.appendChild(tr);
   });
 
-  if(admin){
+  if(editable){
     tbody.querySelectorAll('input').forEach(inp=>{
       inp.addEventListener('change', async (e)=>{
         const id = e.target.dataset.id;
@@ -682,8 +690,8 @@ function render(){
     });
   }
 
-  document.getElementById('invActions').style.display = admin ? '' : 'none';
-  document.getElementById('invEditBtn').textContent = admin ? '🔓 Editando' : '🔒 Editar';
+  document.getElementById('invActions').style.display = editable ? '' : 'none';
+  document.getElementById('invEditBtn').textContent = editable ? '✔ Guardar y cerrar' : '🔒 Editar';
 
   renderSummary();
 }
@@ -714,8 +722,10 @@ function renderSummary(){
 }
 
 document.getElementById('invEditBtn').addEventListener('click', ()=>{
-  if(isAdmin()){ render(); return; } // ya admin, nada que pedir
-  if(requireAdmin()) render();
+  if(invEditing){ invEditing = false; render(); setStatus('uploadStatus','Cambios guardados. Edición cerrada.','ok'); return; }
+  if(!requireAdmin()) return;
+  invEditing = true;
+  render();
 });
 
 document.getElementById('addRowBtn').addEventListener('click', async ()=>{
@@ -970,19 +980,18 @@ document.getElementById('addRecipientBtn').addEventListener('click', async ()=>{
 });
 
 // ================== Reporte manual ==================
-async function enviarReporte(grupo){
+async function enviarReporte(fn){
   setStatus('alertStatus', 'Enviando...', '');
   try{
-    const {error} = await sb.rpc('enviar_reporte_manual', {grupo_filtro: grupo});
+    const {error} = await sb.rpc(fn, {grupo_filtro: null});
     if(error) throw error;
     setStatus('alertStatus', 'Reporte enviado a Telegram.', 'ok');
   }catch(e){
     setStatus('alertStatus', 'Error: ' + e.message, 'err');
   }
 }
-document.getElementById('sendAllBtn').addEventListener('click', ()=>enviarReporte(null));
-document.getElementById('sendGeneralBtn').addEventListener('click', ()=>enviarReporte('General'));
-document.getElementById('sendTroncalBtn').addEventListener('click', ()=>enviarReporte('Troncal'));
+document.getElementById('sendLowBtn').addEventListener('click', ()=>enviarReporte('enviar_reporte_manual'));
+document.getElementById('sendAllBtn').addEventListener('click', ()=>enviarReporte('enviar_reporte_completo'));
 
 // ================== Alerta programada ==================
 const DIAS = {0:'Domingo',1:'Lunes',2:'Martes',3:'Miércoles',4:'Jueves',5:'Viernes',6:'Sábado'};
@@ -1022,25 +1031,27 @@ document.getElementById('addScheduleBtn').addEventListener('click', async ()=>{
 });
 
 // ================== Troncal (registro de entregas) ==================
+let troncalEditing = false;
+
 function renderTroncal(){
-  const admin = isAdmin();
+  const editable = isAdmin() && troncalEditing;
   const tbody = document.getElementById('troncalTbody');
   tbody.innerHTML = '';
   troncalEntries.forEach(en=>{
     const tr = document.createElement('tr');
-    const dis = admin ? '' : 'disabled';
+    const dis = editable ? '' : 'disabled';
     tr.innerHTML = `
       <td data-label="Material"><input type="text" value="${escapeHtml(en.material||'')}" ${dis} data-tfield="material" data-tid="${en.id}" style="width:100%;"></td>
       <td style="text-align:right;" data-label="Metros"><input type="number" min="0" value="${en.metros}" ${dis} data-tfield="metros" data-tid="${en.id}" style="width:90px;text-align:right;"></td>
       <td data-label="Entregado a"><input type="text" value="${escapeHtml(en.entregadoA||'')}" ${dis} data-tfield="entregadoA" data-tid="${en.id}" style="width:100%;"></td>
       <td data-label="Fecha"><input type="date" value="${en.fecha||''}" ${dis} data-tfield="fecha" data-tid="${en.id}"></td>
       <td data-label="Observación"><input type="text" value="${escapeHtml(en.observacion||'')}" ${dis} data-tfield="observacion" data-tid="${en.id}" style="width:100%;"></td>
-      <td data-label="">${admin ? `<button class="del" data-remove-troncal="${en.id}" title="Eliminar">✕</button>` : ''}</td>
+      <td data-label="">${editable ? `<button class="del" data-remove-troncal="${en.id}" title="Eliminar">✕</button>` : ''}</td>
     `;
     tbody.appendChild(tr);
   });
 
-  if(admin){
+  if(editable){
     tbody.querySelectorAll('[data-tfield]').forEach(inp=>{
       inp.addEventListener('change', async (e)=>{
         const en = troncalEntries.find(x=>x.id===e.target.dataset.tid);
@@ -1060,8 +1071,8 @@ function renderTroncal(){
     });
   }
 
-  document.getElementById('troncalActions').style.display = admin ? '' : 'none';
-  document.getElementById('troncalEditBtn').textContent = admin ? '🔓 Editando' : '🔒 Editar';
+  document.getElementById('troncalActions').style.display = editable ? '' : 'none';
+  document.getElementById('troncalEditBtn').textContent = editable ? '✔ Guardar y cerrar' : '🔒 Editar';
 }
 
 async function saveTroncal(en){
@@ -1079,16 +1090,43 @@ async function saveTroncal(en){
 }
 
 document.getElementById('troncalEditBtn').addEventListener('click', ()=>{
-  if(isAdmin()){ renderTroncal(); return; }
-  if(requireAdmin()) renderTroncal();
+  if(troncalEditing){ troncalEditing = false; renderTroncal(); return; }
+  if(!requireAdmin()) return;
+  troncalEditing = true;
+  renderTroncal();
 });
 
 document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
-  const en = {id:uid(), material:'Cable troncal', metros:0, entregadoA:'', fecha:new Date().toISOString().slice(0,10), observacion:''};
+  const tecnico = window.prompt('¿Nombre del técnico que se lo llevó?');
+  if(tecnico === null) return; // canceló
+  const hoy = new Date().toISOString().slice(0,10);
+  const fechaInput = window.prompt('Fecha de entrega (AAAA-MM-DD):', hoy);
+  if(fechaInput === null) return;
+
+  const en = {
+    id: uid(),
+    material: 'Cable troncal',
+    metros: 0,
+    entregadoA: tecnico.trim(),
+    fecha: fechaInput.trim() || hoy,
+    observacion: ''
+  };
   troncalEntries.unshift(en);
   renderTroncal();
   await saveTroncal(en);
   renderTroncal();
+  setStatus('troncalAlertStatus', 'Entrega agregada. Puedes editar material, metros u observación directo en la fila.', 'ok');
+});
+
+document.getElementById('sendTroncalLogBtn').addEventListener('click', async ()=>{
+  setStatus('troncalAlertStatus', 'Enviando...', '');
+  try{
+    const {error} = await sb.rpc('enviar_reporte_troncal');
+    if(error) throw error;
+    setStatus('troncalAlertStatus', 'Registro enviado a Telegram.', 'ok');
+  }catch(e){
+    setStatus('troncalAlertStatus', 'Error: ' + e.message, 'err');
+  }
 });
 
 // ================== Navegación por pestañas + panel admin oculto ==================
