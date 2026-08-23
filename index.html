@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 
@@ -265,12 +266,12 @@
   /* ---------- Extras para la versión Supabase ---------- */
   .gear-btn{
     display:inline-flex;align-items:center;justify-content:center;
-    width:34px;height:34px;border-radius:50%;
-    background:var(--panel2);border:1px solid var(--line);color:var(--text-mut);
+    width:36px;height:36px;border-radius:50%;
+    background:var(--cyan-dim);border:1.5px solid var(--cyan);color:var(--cyan);
     cursor:pointer;flex:none;
   }
-  .gear-btn:hover{color:var(--cyan);border-color:var(--cyan);background:var(--cyan-dim);}
-  .gear-btn svg{width:16px;height:16px;}
+  .gear-btn:hover{background:var(--cyan);color:#062723;}
+  .gear-btn svg{width:18px;height:18px;stroke-width:2.2;}
 
   .group-switch{display:flex;gap:6px;margin-bottom:14px;}
   .group-switch button{
@@ -350,6 +351,7 @@
     <section class="tab-panel" data-panel="inventario">
       <div class="card">
         <h2>Cargar inventario desde Excel</h2>
+        <button id="plantillaInvBtn" style="margin-bottom:12px;">📋 Descargar plantilla</button>
         <div class="upload-zone" id="uploadZone">
           <svg class="up-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M12 4 8 8M12 4l4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
           Haz clic aquí o arrastra tu archivo .xlsx / .csv<br>
@@ -440,6 +442,18 @@
           <button class="primary" id="troncalBulkAddBtn">Agregar todos</button>
         </div>
         <div class="status" id="troncalBulkStatus"></div>
+      </div>
+
+      <div class="card" id="troncalExcelCard" style="display:none;">
+        <h2>Cargar material desde Excel</h2>
+        <p class="note">Descarga la plantilla, llénala con Material y Metros, y súbela aquí. Cada fila se agrega como una entrega nueva (técnico, fecha y observación quedan en blanco para completar después).</p>
+        <button id="plantillaTroncalBtn" style="margin-bottom:12px;">📋 Descargar plantilla</button>
+        <div class="upload-zone" id="troncalUploadZone">
+          <svg class="up-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M12 4 8 8M12 4l4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+          Haz clic aquí o arrastra tu archivo .xlsx / .csv (columnas: Material, Metros)
+        </div>
+        <input type="file" id="troncalFileInput" class="hidden-input" accept=".xlsx,.xls,.csv">
+        <div class="status" id="troncalUploadStatus"></div>
       </div>
 
       <div class="card">
@@ -1151,6 +1165,7 @@ function renderTroncal(){
 
   document.getElementById('troncalActions').style.display = editable ? '' : 'none';
   document.getElementById('troncalBulkCard').style.display = editable ? '' : 'none';
+  document.getElementById('troncalExcelCard').style.display = editable ? '' : 'none';
   document.getElementById('troncalEditBtn').textContent = editable ? '✔ Guardar y cerrar' : '🔒 Editar';
 }
 
@@ -1306,6 +1321,94 @@ document.getElementById('themeToggleBtn').addEventListener('click', ()=>{
 });
 
 applyTheme(localStorage.getItem('theme') || 'dark');
+
+// ================== Plantillas de Excel (tabla con formato real) ==================
+async function descargarPlantilla(columnas, nombreArchivo){
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Plantilla');
+  sheet.addTable({
+    name: 'TablaPlantilla' + Date.now(),
+    ref: 'A1',
+    headerRow: true,
+    style: { theme: 'TableStyleMedium2', showRowStripes: true },
+    columns: columnas.map(c => ({ name: c })),
+    rows: []
+  });
+  columnas.forEach((c, i) => { sheet.getColumn(i + 1).width = Math.max(18, c.length + 6); });
+
+  const buf = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombreArchivo;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('plantillaInvBtn').addEventListener('click', ()=>{
+  descargarPlantilla(['Material','Cantidad','Minimo'], 'plantilla_inventario.xlsx');
+});
+
+document.getElementById('plantillaTroncalBtn').addEventListener('click', ()=>{
+  descargarPlantilla(['Material','Metros'], 'plantilla_troncal.xlsx');
+});
+
+// ================== Cargar Troncal desde Excel ==================
+const troncalUploadZone = document.getElementById('troncalUploadZone');
+const troncalFileInput = document.getElementById('troncalFileInput');
+troncalUploadZone.addEventListener('click', ()=>troncalFileInput.click());
+troncalUploadZone.addEventListener('dragover', (e)=>{e.preventDefault(); troncalUploadZone.style.borderColor='var(--cyan)';});
+troncalUploadZone.addEventListener('dragleave', ()=>{troncalUploadZone.style.borderColor='var(--line)';});
+troncalUploadZone.addEventListener('drop', (e)=>{
+  e.preventDefault();
+  troncalUploadZone.style.borderColor='var(--line)';
+  if(e.dataTransfer.files.length) handleTroncalFile(e.dataTransfer.files[0]);
+});
+troncalFileInput.addEventListener('change', (e)=>{
+  if(e.target.files.length) handleTroncalFile(e.target.files[0]);
+});
+
+function handleTroncalFile(file){
+  const reader = new FileReader();
+  reader.onload = async (e)=>{
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      if(!rows.length){ setStatus('troncalUploadStatus','El archivo está vacío.','err'); return; }
+
+      const headers = rows[0];
+      let nameCol = findCol(headers, ['material','producto','nombre','cable']);
+      let metrosCol = findCol(headers, ['metros','cantidad']);
+      if(nameCol===-1) nameCol = 0;
+      if(metrosCol===-1) metrosCol = 1;
+
+      let agregados = 0;
+      for(let i=1;i<rows.length;i++){
+        const r = rows[i];
+        const material = String(r[nameCol]||'').trim();
+        if(!material) continue;
+        const metros = parseFloat(r[metrosCol]);
+        const en = {id:uid(), material, metros: isNaN(metros)?0:metros, entregadoA:'', fecha:'', devuelto:0, observacion:''};
+        troncalEntries.unshift(en);
+        await saveTroncal(en);
+        agregados++;
+      }
+
+      if(!agregados){
+        setStatus('troncalUploadStatus','No se encontraron filas con un material válido.','err');
+        return;
+      }
+      renderTroncal();
+      setStatus('troncalUploadStatus', `Se agregaron ${agregados} entrada(s) desde el Excel.`, 'ok');
+    }catch(err){
+      console.error(err);
+      setStatus('troncalUploadStatus', 'No se pudo leer el archivo. Revisa que sea un Excel o CSV válido.', 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
 
 // ================== Exportar a Excel ==================
 function descargarExcel(filas, nombreArchivo){
