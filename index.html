@@ -39,6 +39,7 @@
 
     --radius:12px;
     --radius-sm:8px;
+    --topbar-bg: rgba(11,15,19,0.86);
   }
 
   body.theme-light{
@@ -52,6 +53,7 @@
     --text:#1a2027;
     --text-mut:#5c6873;
     --text-dim:#9aa5ae;
+    --topbar-bg: rgba(255,255,255,0.86);
 
     --cyan-dim:rgba(20,150,140,0.12);
     --apc-green-dim:rgba(30,160,90,0.12);
@@ -79,7 +81,7 @@
     gap:12px;
     padding:16px 16px;
     margin:0 -16px;
-    background:rgba(11,15,19,0.86);
+    background:var(--topbar-bg);
     backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line-soft);
   }
@@ -264,10 +266,10 @@
   .gear-btn{
     display:inline-flex;align-items:center;justify-content:center;
     width:34px;height:34px;border-radius:50%;
-    background:var(--panel2);border:1px solid var(--line);color:var(--text-dim);
+    background:var(--panel2);border:1px solid var(--line);color:var(--text-mut);
     cursor:pointer;flex:none;
   }
-  .gear-btn:hover{color:var(--cyan);border-color:var(--cyan);}
+  .gear-btn:hover{color:var(--cyan);border-color:var(--cyan);background:var(--cyan-dim);}
   .gear-btn svg{width:16px;height:16px;}
 
   .group-switch{display:flex;gap:6px;margin-bottom:14px;}
@@ -381,6 +383,9 @@
             </thead>
             <tbody id="tbody"></tbody>
           </table>
+          <div class="footer-actions">
+            <button id="exportInvBtn">⬇ Descargar Excel</button>
+          </div>
           <div class="footer-actions" id="invActions" style="display:none;">
             <button id="addRowBtn">+ Agregar material</button>
             <button class="danger-btn" id="cleanBtn">Quitar fuera de lista</button>
@@ -418,6 +423,9 @@
             </thead>
             <tbody id="troncalTbody"></tbody>
           </table>
+          <div class="footer-actions">
+            <button id="exportTroncalBtn">⬇ Descargar Excel</button>
+          </div>
           <div class="footer-actions" id="troncalActions" style="display:none;">
             <button id="addTroncalBtn">+ Agregar entrega</button>
           </div>
@@ -1298,6 +1306,40 @@ document.getElementById('themeToggleBtn').addEventListener('click', ()=>{
 });
 
 applyTheme(localStorage.getItem('theme') || 'dark');
+
+// ================== Exportar a Excel ==================
+function descargarExcel(filas, nombreArchivo){
+  const ws = XLSX.utils.json_to_sheet(filas);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+  const fecha = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `${nombreArchivo}_${fecha}.xlsx`);
+}
+
+document.getElementById('exportInvBtn').addEventListener('click', ()=>{
+  if(!items.length){ setStatus('uploadStatus','No hay materiales para exportar.','err'); return; }
+  const filas = items.map(it=>({
+    Material: it.name,
+    Cantidad: it.qty,
+    Minimo: it.min,
+    Estado: statusOf(it)==='low' ? 'Agotado' : statusOf(it)==='warn' ? 'Por acabarse' : 'Ok'
+  }));
+  descargarExcel(filas, 'inventario_general');
+  setStatus('uploadStatus', 'Excel descargado.', 'ok');
+});
+
+document.getElementById('exportTroncalBtn').addEventListener('click', ()=>{
+  if(!troncalEntries.length){ setStatus('troncalAlertStatus','No hay entregas para exportar.','err'); return; }
+  const filas = troncalEntries.map(en=>({
+    Material: en.material,
+    Metros: en.metros,
+    'Entregado a': en.entregadoA || '',
+    Fecha: en.fecha || '',
+    'Observación / Devuelto': en.observacion || ''
+  }));
+  descargarExcel(filas, 'registro_troncal');
+  setStatus('troncalAlertStatus', 'Excel descargado.', 'ok');
+});
 
 loadAll();
 subscribeRealtime();
