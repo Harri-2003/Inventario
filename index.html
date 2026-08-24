@@ -485,7 +485,7 @@
           <span>Destinatarios de la alerta</span>
           <button id="recipientsLockBtn" style="font-size:11px;padding:6px 11px;">🔒 Ocultar</button>
         </h2>
-        <p class="note">Cada destinatario elige a qué grupo de alertas está suscrito. La persona debe primero escribirle a tu bot y darte su chat_id.</p>
+        <p class="note">Cada destinatario elige a qué grupo de alertas está suscrito. La persona debe primero escribirle a tu bot y darte su chat_id. Para saber cómo sacar el chat_id, revisa las instrucciones que te di al principio (BotFather + getUpdates), o dime y te las repito.</p>
         <div id="recipientsList" style="margin-bottom:12px;"></div>
         <div class="row">
           <div class="field">
@@ -502,6 +502,13 @@
               <option value="General,Troncal">General + Troncal</option>
               <option value="General">Solo General</option>
               <option value="Troncal">Solo Troncal</option>
+            </select>
+          </div>
+          <div class="field" style="min-width:170px;">
+            <label>Alertas automáticas</label>
+            <select id="newChatAuto">
+              <option value="si">Sí, automáticas + manuales</option>
+              <option value="no">No, solo cuando yo envíe manual</option>
             </select>
           </div>
           <button id="addRecipientBtn">Agregar</button>
@@ -672,7 +679,7 @@ async function loadAll(){
     if(prod.error) throw prod.error;
     items = (prod.data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
     permitidos = (perm.data||[]).map(r=>({id:r.id, nombre:r.nombre_exacto, etiqueta:r.etiqueta, min:Number(r.minimo_defecto), grupo:r.grupo}));
-    recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[]}));
+    recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
     schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo}));
     troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0)}));
     setConnLed('ok');
@@ -928,13 +935,36 @@ function handleFile(file){
         }
       }
 
+      // Si un producto de la lista permitida NO aparece en este Excel, es porque
+      // el sistema grande ya no tiene existencia de eso -> se pone en 0 (agotado).
+      const nombresEnExcel = new Set(Object.keys(sums).map(n=>normalizeName(n)));
+      let puestosEnCero = 0;
+      for(const perm of permitidos){
+        if(nombresEnExcel.has(normalizeName(perm.nombre))) continue; // sí vino en el Excel
+        const existing = items.find(it=>normalizeName(it.name)===normalizeName(perm.nombre));
+        if(existing){
+          if(existing.qty !== 0){
+            existing.qty = 0;
+            await saveItem(existing);
+            puestosEnCero++;
+          }
+        } else {
+          const it = {id:uid(), name: perm.etiqueta || perm.nombre, qty:0, min: perm.min, grupo: perm.grupo};
+          items.push(it);
+          await saveItem(it);
+          puestosEnCero++;
+        }
+      }
+
       if(!importados){
         setStatus('uploadStatus','No se encontró ningún producto de tu lista permitida en este archivo. Revisa el panel admin.','err');
         return;
       }
 
       render();
-      setStatus('uploadStatus', `Se importaron ${importados} producto(s). Se ignoraron ${ignorados} que no están en la lista permitida.`, 'ok');
+      let msg = `Se importaron ${importados} producto(s). Se ignoraron ${ignorados} que no están en la lista permitida.`;
+      if(puestosEnCero > 0) msg += ` ${puestosEnCero} producto(s) de tu lista no aparecían en el Excel y se pusieron en 0 (agotado).`;
+      setStatus('uploadStatus', msg, 'ok');
     }catch(err){
       console.error(err);
       setStatus('uploadStatus', 'No se pudo leer el archivo. Revisa que sea un Excel o CSV válido.', 'err');
@@ -1035,8 +1065,9 @@ function renderRecipients(){
   const box = document.getElementById('recipientsList');
   if(!recipients.length){ box.innerHTML = '<span class="note" style="margin:0;">No hay destinatarios.</span>'; return; }
   box.innerHTML = recipients.map(r=>`
-    <span class="badge ok" style="margin:2px 6px 2px 0;display:inline-flex;align-items:center;gap:6px;">
-      ${escapeHtml(r.nombre || r.chatId)} (${r.grupos.join(', ')})
+    <span class="badge ${r.recibeAuto ? 'ok' : 'warn'}" style="margin:2px 6px 2px 0;display:inline-flex;align-items:center;gap:6px;">
+      ${escapeHtml(r.nombre || r.chatId)} (${r.grupos.join(', ')}) ${r.recibeAuto ? '' : '· solo manual'}
+      <button class="del" data-toggle-auto="${r.id}" title="${r.recibeAuto ? 'Pasar a solo manual' : 'Activar automáticas'}" style="padding:0;font-size:13px;">${r.recibeAuto ? '🔔' : '🔕'}</button>
       <button class="del" data-remove-chat="${r.id}" style="padding:0;font-size:13px;">✕</button>
     </span>
   `).join('');
@@ -1048,18 +1079,29 @@ function renderRecipients(){
       try{ await sb.from('destinatarios').delete().eq('id', id); }catch(e){}
     });
   });
+  box.querySelectorAll('[data-toggle-auto]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const r = recipients.find(x=>x.id===btn.dataset.toggleAuto);
+      if(!r) return;
+      r.recibeAuto = !r.recibeAuto;
+      renderRecipients();
+      try{ await sb.from('destinatarios').update({recibe_automaticas: r.recibeAuto}).eq('id', r.id); }catch(e){}
+      setStatus('recipientsStatus', r.recibeAuto ? 'Ahora recibe alertas automáticas también.' : 'Ahora solo recibe cuando envíes manual.', 'ok');
+    });
+  });
 }
 
 document.getElementById('addRecipientBtn').addEventListener('click', async ()=>{
   const chatId = document.getElementById('newChatId').value.trim();
   const nombre = document.getElementById('newChatName').value.trim();
   const grupos = document.getElementById('newChatGroups').value.split(',');
+  const recibeAuto = document.getElementById('newChatAuto').value === 'si';
   if(!chatId || !/^-?\d+$/.test(chatId)){ setStatus('recipientsStatus','Escribe un chat_id válido.','err'); return; }
   if(recipients.some(r=>r.chatId===chatId)){ setStatus('recipientsStatus','Ese chat_id ya está agregado.','err'); return; }
   try{
-    const {data, error} = await sb.from('destinatarios').insert({chat_id:chatId, nombre, grupos}).select().single();
+    const {data, error} = await sb.from('destinatarios').insert({chat_id:chatId, nombre, grupos, recibe_automaticas:recibeAuto}).select().single();
     if(error) throw error;
-    recipients.push({id:data.id, chatId:data.chat_id, nombre:data.nombre, grupos:data.grupos});
+    recipients.push({id:data.id, chatId:data.chat_id, nombre:data.nombre, grupos:data.grupos, recibeAuto:data.recibe_automaticas});
     renderRecipients();
     document.getElementById('newChatId').value = '';
     document.getElementById('newChatName').value = '';
@@ -1436,37 +1478,88 @@ function handleTroncalFile(file){
   reader.readAsArrayBuffer(file);
 }
 
-// ================== Exportar a Excel ==================
-function descargarExcel(filas, nombreArchivo){
-  const ws = XLSX.utils.json_to_sheet(filas);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+// ================== Exportar a Excel (con formato bonito) ==================
+async function descargarExcelFormateado({titulo, columnas, filas, coloresEstado}){
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Datos');
+  const nCol = columnas.length;
+
+  sheet.mergeCells(1,1,1,nCol);
+  const tituloCell = sheet.getCell(1,1);
+  tituloCell.value = titulo;
+  tituloCell.font = { bold:true, size:13, color:{argb:'FFFFFFFF'} };
+  tituloCell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF1F3864'} };
+  tituloCell.alignment = { vertical:'middle', horizontal:'center' };
+  sheet.getRow(1).height = 26;
+
+  const header = sheet.addRow(columnas);
+  header.eachCell(cell=>{
+    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF2E75B6'} };
+    cell.alignment = { vertical:'middle', horizontal:'center' };
+  });
+
+  filas.forEach(fila=>{
+    const row = sheet.addRow(fila);
+    row.eachCell((cell, colNum)=>{ if(colNum>1) cell.alignment = { horizontal:'center' }; });
+    if(coloresEstado){
+      const idx = coloresEstado.columna; // índice de columna 1-based con el texto de estado
+      const estadoTexto = fila[idx-1];
+      const colores = coloresEstado.mapa[estadoTexto];
+      if(colores){
+        const cell = row.getCell(idx);
+        cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:colores.fondo} };
+        cell.font = { bold:true, color:{argb:colores.texto} };
+      }
+    }
+  });
+
+  columnas.forEach((c,i)=>{ sheet.getColumn(i+1).width = Math.max(20, c.length + 8); });
+  sheet.views = [{ state:'frozen', ySplit:2 }];
+
+  const buf = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
   const fecha = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, `${nombreArchivo}_${fecha}.xlsx`);
+  a.href = url; a.download = `${titulo.toLowerCase().replace(/[^a-z0-9]+/g,'_')}_${fecha}.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
-document.getElementById('exportInvBtn').addEventListener('click', ()=>{
+document.getElementById('exportInvBtn').addEventListener('click', async ()=>{
   if(!items.length){ setStatus('uploadStatus','No hay materiales para exportar.','err'); return; }
-  const filas = items.map(it=>({
-    Material: it.name,
-    Cantidad: it.qty,
-    Minimo: it.min,
-    Estado: statusOf(it)==='low' ? 'Agotado' : statusOf(it)==='warn' ? 'Por acabarse' : 'Ok'
-  }));
-  descargarExcel(filas, 'inventario_general');
+  const filas = items.map(it=>{
+    const st = statusOf(it);
+    const estado = st==='low' ? 'AGOTADO' : st==='warn' ? 'POR ACABARSE' : 'OK';
+    return [it.name, it.qty, estado];
+  });
+  await descargarExcelFormateado({
+    titulo: 'TABLA DE CONTEO DE MATERIALES – INVENTARIO GENERAL',
+    columnas: ['MATERIAL','CANTIDAD EN INVENTARIO','ESTADO'],
+    filas,
+    coloresEstado: {
+      columna: 3,
+      mapa: {
+        'AGOTADO':      { fondo:'FFFCE4E4', texto:'FFB91C1C' },
+        'POR ACABARSE': { fondo:'FFFFF3D6', texto:'FF92600A' },
+        'OK':           { fondo:'FFE6F6EB', texto:'FF15803D' }
+      }
+    }
+  });
   setStatus('uploadStatus', 'Excel descargado.', 'ok');
 });
 
-document.getElementById('exportTroncalBtn').addEventListener('click', ()=>{
+document.getElementById('exportTroncalBtn').addEventListener('click', async ()=>{
   if(!troncalEntries.length){ setStatus('troncalAlertStatus','No hay entregas para exportar.','err'); return; }
-  const filas = troncalEntries.map(en=>({
-    Material: en.material,
-    Metros: en.metros,
-    'Entregado a': en.entregadoA || '',
-    Fecha: en.fecha || '',
-    'Observación / Devuelto': en.observacion || ''
-  }));
-  descargarExcel(filas, 'registro_troncal');
+  const filas = troncalEntries.map(en=>[
+    en.material, en.metros, en.entregadoA || '', en.fecha || '', en.observacion || ''
+  ]);
+  await descargarExcelFormateado({
+    titulo: 'REGISTRO DE ENTREGAS – TRONCAL',
+    columnas: ['MATERIAL','METROS','ENTREGADO A','FECHA','OBSERVACIÓN / DEVUELTO'],
+    filas
+  });
   setStatus('troncalAlertStatus', 'Excel descargado.', 'ok');
 });
 
