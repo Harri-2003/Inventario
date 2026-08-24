@@ -430,6 +430,7 @@
           </div>
           <div class="footer-actions" id="troncalActions" style="display:none;">
             <button id="addTroncalBtn">+ Agregar entrega</button>
+            <button class="danger-btn" id="cleanDatesBtn">Limpiar fechas sin asignar</button>
           </div>
         </div>
       </div>
@@ -1225,6 +1226,22 @@ document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
   await saveTroncal(en);
   renderTroncal();
   setStatus('troncalAlertStatus', 'Entrega agregada. Completa material, metros, fecha y observación directo en la fila.', 'ok');
+});
+
+document.getElementById('cleanDatesBtn').addEventListener('click', async ()=>{
+  const afectadas = troncalEntries.filter(en => !en.entregadoA && en.fecha);
+  if(!afectadas.length){
+    setStatus('troncalAlertStatus', 'No hay fechas sueltas para limpiar (todas están vacías o ya tienen técnico asignado).', 'ok');
+    return;
+  }
+  if(!confirm(`Se va a borrar la fecha de ${afectadas.length} fila(s) que no tienen técnico asignado (quedaron así de antes). ¿Continuar?`)) return;
+
+  for(const en of afectadas){
+    en.fecha = '';
+    await saveTroncal(en);
+  }
+  renderTroncal();
+  setStatus('troncalAlertStatus', `Se limpiaron ${afectadas.length} fecha(s).`, 'ok');
 });
 
 document.getElementById('troncalBulkAddBtn').addEventListener('click', async ()=>{
