@@ -650,7 +650,7 @@ function setConnLed(state){
 }
 
 function statusOf(it){
-  if(it.qty <= it.min * 0.30) return 'low';       // 30% o menos del mínimo -> Agotado
+  if(it.qty <= it.min * 0.10) return 'low';       // 10% o menos del mínimo -> Agotado
   if(it.qty <= it.min * 0.50) return 'warn';      // 50% o menos del mínimo -> Por acabarse
   return 'ok';                                     // por encima del 50% -> Ok
 }
