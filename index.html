@@ -370,6 +370,7 @@
           </span>
         </h2>
         <div id="invCollapseBody" style="display:none;">
+          <div class="group-switch" id="stockSwitcher" style="flex-wrap:wrap;"></div>
           <div class="field" style="margin-bottom:12px;">
             <input type="text" id="invSearch" placeholder="Buscar material… ej: amarra, conector, ont">
           </div>
@@ -409,6 +410,7 @@
         </h2>
         <div id="troncalCollapseBody" style="display:none;">
           <p class="note">Registro de cable de fibra troncal entregado: cuánto, a quién, cuándo y cuánto se devuelve. No maneja mínimos ni alertas, es solo una bitácora.</p>
+          <div class="group-switch" id="logSwitcher" style="flex-wrap:wrap;"></div>
           <div class="field" style="margin-bottom:12px;">
             <input type="text" id="troncalSearch" placeholder="Buscar material… ej: 12 hilos, 24h, spam 400">
           </div>
@@ -496,13 +498,9 @@
             <label>Nombre (opcional)</label>
             <input type="text" id="newChatName" placeholder="ej: Juan">
           </div>
-          <div class="field" style="min-width:130px;">
-            <label>Grupos</label>
-            <select id="newChatGroups">
-              <option value="General,Troncal">General + Troncal</option>
-              <option value="General">Solo General</option>
-              <option value="Troncal">Solo Troncal</option>
-            </select>
+          <div class="field" style="min-width:160px;">
+            <label>Grupos (bodegas)</label>
+            <div id="newChatGroupsBox" style="display:flex;flex-wrap:wrap;gap:8px;padding:9px 0;"></div>
           </div>
           <div class="field" style="min-width:170px;">
             <label>Alertas automáticas</label>
@@ -535,11 +533,41 @@
       </button>
 
       <div class="card">
+        <h2>Gestionar bodegas</h2>
+        <p class="note">
+          Crea, renombra o elimina bodegas. "Stock" = como Inventario (con mínimos y estado). "Registro" = como Troncal (bitácora, sin mínimos).
+          "Ninguna" en alertas = ni automática ni manual, solo se ve en la página. "Oculta" = solo tú la ves, con tu clave.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Tipo</th>
+              <th>Alertas</th>
+              <th>Oculta</th>
+              <th>Sin filtro*</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="bodegasTbody"></tbody>
+        </table>
+        <p class="note" style="margin:8px 0 0;">*Sin filtro: solo aplica a bodegas tipo Stock. Si está marcado, el Excel se importa completo, sin lista blanca.</p>
+        <div class="footer-actions">
+          <button id="addBodegaBtn">+ Agregar bodega</button>
+        </div>
+        <div class="status" id="bodegasStatus"></div>
+      </div>
+
+      <div class="card">
         <h2>Productos permitidos (lista blanca)</h2>
         <p class="note">
           Solo los productos cuyo nombre coincida <b>exactamente</b> con uno de esta lista se importan del Excel
-          (sin importar mayúsculas/minúsculas ni espacios de más). Todo lo demás se ignora.
+          (sin importar mayúsculas/minúsculas ni espacios de más). Todo lo demás se ignora. Esto no aplica a bodegas "sin filtro".
         </p>
+        <div class="field" style="max-width:260px;margin-bottom:12px;">
+          <label>Bodega que estás configurando</label>
+          <select id="permitidosBodegaSelect"></select>
+        </div>
         <table>
           <thead>
             <tr>
@@ -558,7 +586,7 @@
 
       <div class="card">
         <h2>Agregar varios de una vez</h2>
-        <p class="note">Pega un nombre de producto exacto por línea (para el inventario General). Se agregan todos con el mismo mínimo, y los puedes ajustar después uno por uno.</p>
+        <p class="note">Pega un nombre de producto exacto por línea, para la bodega que elegiste arriba. Se agregan todos con el mismo mínimo, y los puedes ajustar después uno por uno.</p>
         <textarea id="bulkNames" placeholder="Amarra Plástica Blanca 10 Cm&#10;Amarra Plástica Blanca 25 Cm&#10;Amarra Plástica Negra 10 Cm"></textarea>
         <div class="row" style="margin-top:10px;">
           <div class="field" style="max-width:140px;">
@@ -593,11 +621,37 @@
         </div>
         <div class="status" id="scheduleStatus"></div>
       </div>
+
+      <div class="card">
+        <h2>Historial de cambios</h2>
+        <p class="note">Cada vez que se crea, edita o borra un producto o una entrega de troncal, queda aquí. Guardado en Supabase, no en tu navegador.</p>
+        <div class="row" style="margin-bottom:12px;">
+          <button id="refreshHistorialBtn">🔄 Actualizar</button>
+        </div>
+        <div id="historialList" style="max-height:420px;overflow-y:auto;"></div>
+      </div>
+
+      <div class="card">
+        <h2>Consultar disponibilidad (texto o imagen)</h2>
+        <p class="note">
+          Pega el texto de un pedido, o pega/sube una imagen (se lee el texto automáticamente).
+          Busca en TODAS las bodegas tipo Stock y te dice qué hay, cuánto, y su estado.
+        </p>
+        <textarea id="dispoTexto" placeholder="Pega aquí el mensaje del pedido, ej: 'necesito amarras blancas de 10cm y conectores verdes'"></textarea>
+        <div class="row" style="margin-top:10px;">
+          <button id="dispoImagenBtn">🖼️ Pegar/subir imagen</button>
+          <button class="primary" id="dispoBuscarBtn">Buscar disponibilidad</button>
+        </div>
+        <input type="file" id="dispoImagenInput" class="hidden-input" accept="image/*">
+        <div class="status" id="dispoOcrStatus"></div>
+        <div id="dispoResultados" style="margin-top:14px;"></div>
+      </div>
     </section>
 
   </main>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
 <script>
 // ================== Configuración ==================
 // Pega aquí los datos de tu proyecto (Supabase > Project Settings > API).
@@ -616,6 +670,10 @@ let permitidos = [];
 let recipients = [];
 let schedules = [];
 let troncalEntries = [];
+let bodegas = [];
+let currentStockBodega = 'General';
+let currentLogBodega = 'Troncal';
+let permitidosBodega = 'General';
 
 function uid(){ return 'i'+Math.random().toString(36).slice(2,10); }
 
@@ -669,19 +727,29 @@ async function loadAll(){
   }
   setConnLed('checking');
   try{
-    const [prod, perm, dest, sched, tron] = await Promise.all([
+    const [prod, perm, dest, sched, tron, bod] = await Promise.all([
       sb.from('productos').select('*').order('grupo').order('nombre'),
       sb.from('productos_permitidos').select('*').order('grupo').order('etiqueta'),
       sb.from('destinatarios').select('*'),
       sb.from('alertas_programadas').select('*').order('dia_semana').order('hora'),
-      sb.from('troncal_entregas').select('*').order('fecha', {ascending:false})
+      sb.from('troncal_entregas').select('*').order('fecha', {ascending:false}),
+      sb.from('bodegas').select('*').order('orden').order('nombre')
     ]);
     if(prod.error) throw prod.error;
     items = (prod.data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
     permitidos = (perm.data||[]).map(r=>({id:r.id, nombre:r.nombre_exacto, etiqueta:r.etiqueta, min:Number(r.minimo_defecto), grupo:r.grupo}));
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
     schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo}));
-    troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0)}));
+    troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal'}));
+    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, orden:r.orden}));
+    if(!bodegas.some(b=>b.nombre===currentStockBodega && b.tipo==='stock')){
+      const primero = bodegas.find(b=>b.tipo==='stock' && !b.oculta);
+      if(primero) currentStockBodega = primero.nombre;
+    }
+    if(!bodegas.some(b=>b.nombre===currentLogBodega && b.tipo==='log')){
+      const primero = bodegas.find(b=>b.tipo==='log' && !b.oculta);
+      if(primero) currentLogBodega = primero.nombre;
+    }
     setConnLed('ok');
   }catch(e){
     console.error(e);
@@ -692,6 +760,9 @@ async function loadAll(){
   renderRecipients();
   renderSchedules();
   renderTroncal();
+  renderBodegasAdmin();
+  renderStockSwitcher();
+  renderLogSwitcher();
 }
 
 let realtimeDebounce = null;
@@ -730,7 +801,8 @@ function render(){
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
   const q = normalizeName(invSearch);
-  const visibles = q ? items.filter(it => normalizeName(it.name||'').includes(q)) : items;
+  let visibles = items.filter(it => it.grupo === currentStockBodega);
+  if(q) visibles = visibles.filter(it => normalizeName(it.name||'').includes(q));
   visibles.forEach(it=>{
     const st = statusOf(it);
     const tr = document.createElement('tr');
@@ -792,9 +864,10 @@ async function saveItem(it){
 }
 
 function renderSummary(){
-  const low = items.filter(it=>statusOf(it)==='low').length;
-  const warn = items.filter(it=>statusOf(it)==='warn').length;
-  const ok = items.length - low - warn;
+  const enBodega = items.filter(it=>it.grupo === currentStockBodega);
+  const low = enBodega.filter(it=>statusOf(it)==='low').length;
+  const warn = enBodega.filter(it=>statusOf(it)==='warn').length;
+  const ok = enBodega.length - low - warn;
   document.getElementById('summary').innerHTML = `
     <div class="metric low"><div class="n" style="color:var(--red)">${low}</div><div class="l">Agotado</div></div>
     <div class="metric warn"><div class="n" style="color:var(--amber)">${warn}</div><div class="l">Por acabarse</div></div>
@@ -816,7 +889,7 @@ document.getElementById('invEditBtn').addEventListener('click', ()=>{
 });
 
 document.getElementById('addRowBtn').addEventListener('click', async ()=>{
-  const it = {id:uid(), name:'Nuevo material', qty:0, min:5, grupo:'General'};
+  const it = {id:uid(), name:'Nuevo material', qty:0, min:5, grupo:currentStockBodega};
   items.push(it);
   render();
   await saveItem(it);
@@ -824,25 +897,31 @@ document.getElementById('addRowBtn').addEventListener('click', async ()=>{
 });
 
 document.getElementById('cleanBtn').addEventListener('click', async ()=>{
-  const permitidosSet = new Set(permitidos.map(p=>normalizeName(p.nombre)));
-  const antes = items.length;
-  const aBorrar = items.filter(it=>!permitidosSet.has(normalizeName(it.name)));
-  items = items.filter(it=>permitidosSet.has(normalizeName(it.name)));
+  const bodegaActual = bodegas.find(b=>b.nombre===currentStockBodega);
+  if(bodegaActual && bodegaActual.sinFiltro){
+    setStatus('uploadStatus', 'Esta bodega es "sin filtro", no tiene lista permitida contra la cual limpiar.', 'err');
+    return;
+  }
+  const permitidosSet = new Set(permitidos.filter(p=>p.grupo===currentStockBodega).map(p=>normalizeName(p.nombre)));
+  const enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
+  const aBorrar = enEstaBodega.filter(it=>!permitidosSet.has(normalizeName(it.name)));
+  items = items.filter(it=>it.grupo!==currentStockBodega || permitidosSet.has(normalizeName(it.name)));
   render();
   for(const it of aBorrar){ try{ await sb.from('productos').delete().eq('id', it.id); }catch(e){} }
-  setStatus('uploadStatus', aBorrar.length ? `Se quitaron ${aBorrar.length} producto(s) que no están en la lista permitida.` : 'No había productos fuera de la lista.', 'ok');
+  setStatus('uploadStatus', aBorrar.length ? `Se quitaron ${aBorrar.length} producto(s) que no están en la lista permitida de "${currentStockBodega}".` : 'No había productos fuera de la lista en esta bodega.', 'ok');
 });
 
 document.getElementById('dedupBtn').addEventListener('click', async ()=>{
+  const enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
   const groups = {};
-  items.forEach(it=>{
+  enEstaBodega.forEach(it=>{
     const key = normalizeName(it.name);
     (groups[key] = groups[key]||[]).push(it);
   });
   const dupGroups = Object.values(groups).filter(g=>g.length>1);
-  if(!dupGroups.length){ setStatus('uploadStatus','No se encontraron productos duplicados.','ok'); return; }
+  if(!dupGroups.length){ setStatus('uploadStatus','No se encontraron productos duplicados en esta bodega.','ok'); return; }
   const resumen = dupGroups.map(g=>`- ${g[0].name} (${g.length} filas -> ${g.reduce((s,x)=>s+(x.qty||0),0)})`).join('\n');
-  if(!confirm(`Se encontraron ${dupGroups.length} duplicado(s):\n\n${resumen}\n\n¿Unir en una sola fila por producto?`)) return;
+  if(!confirm(`Se encontraron ${dupGroups.length} duplicado(s) en "${currentStockBodega}":\n\n${resumen}\n\n¿Unir en una sola fila por producto?`)) return;
 
   const merged = [];
   const aBorrar = [];
@@ -851,7 +930,7 @@ document.getElementById('dedupBtn').addEventListener('click', async ()=>{
     merged.push({id:g[0].id, name:g[0].name, qty:g.reduce((s,x)=>s+(x.qty||0),0), min:Math.max(...g.map(x=>x.min||0)), grupo:g[0].grupo});
     aBorrar.push(...g.slice(1));
   });
-  items = merged;
+  items = items.filter(it=>it.grupo!==currentStockBodega).concat(merged);
   render();
   for(const it of merged){ await saveItem(it); }
   for(const it of aBorrar){ try{ await sb.from('productos').delete().eq('id', it.id); }catch(e){} }
@@ -859,18 +938,18 @@ document.getElementById('dedupBtn').addEventListener('click', async ()=>{
 });
 
 document.getElementById('resetBtn').addEventListener('click', async ()=>{
-  if(!confirm('Esto borra TODO el inventario. ¿Seguro?')) return;
-  const toDelete = items.map(it=>it.id);
-  items = [];
+  if(!confirm(`Esto borra TODO el inventario de "${currentStockBodega}" (las demás bodegas no se tocan). ¿Seguro?`)) return;
+  const toDelete = items.filter(it=>it.grupo===currentStockBodega).map(it=>it.id);
+  items = items.filter(it=>it.grupo!==currentStockBodega);
   render();
   for(const id of toDelete){ try{ await sb.from('productos').delete().eq('id', id); }catch(e){} }
-  setStatus('uploadStatus', 'Inventario vaciado.', 'ok');
+  setStatus('uploadStatus', `Inventario de "${currentStockBodega}" vaciado.`, 'ok');
 });
 
 // ================== Carga de Excel ==================
 function matchPermitido(name){
   const n = normalizeName(name);
-  return permitidos.find(p => normalizeName(p.nombre) === n) || null;
+  return permitidos.find(p => p.grupo===currentStockBodega && normalizeName(p.nombre) === n) || null;
 }
 
 function findCol(headers, keywords){
@@ -918,51 +997,62 @@ function handleFile(file){
         sums[name] = (sums[name]||0) + (isNaN(qty)?0:qty);
       }
 
+      const bodegaActual = bodegas.find(b=>b.nombre===currentStockBodega);
+      const sinFiltro = bodegaActual && bodegaActual.sinFiltro;
+
       let importados = 0, ignorados = 0;
       for(const name of Object.keys(sums)){
-        const perm = matchPermitido(name);
-        if(!perm){ ignorados++; continue; }
+        let min = 10, etiqueta = name;
+        if(!sinFiltro){
+          const perm = matchPermitido(name);
+          if(!perm){ ignorados++; continue; }
+          min = perm.min; etiqueta = perm.etiqueta || name;
+        }
         importados++;
         const qty = sums[name];
-        const existing = items.find(it=>normalizeName(it.name)===normalizeName(name));
+        const existing = items.find(it=>it.grupo===currentStockBodega && normalizeName(it.name)===normalizeName(name));
         if(existing){
           existing.qty = qty;
           await saveItem(existing);
         } else {
-          const it = {id:uid(), name: perm.etiqueta || name, qty, min: perm.min, grupo: perm.grupo};
+          const it = {id:uid(), name: etiqueta, qty, min, grupo: currentStockBodega};
           items.push(it);
           await saveItem(it);
         }
       }
 
-      // Si un producto de la lista permitida NO aparece en este Excel, es porque
-      // el sistema grande ya no tiene existencia de eso -> se pone en 0 (agotado).
-      const nombresEnExcel = new Set(Object.keys(sums).map(n=>normalizeName(n)));
+      // Si un producto de la lista permitida de ESTA bodega NO aparece en este
+      // Excel, es porque el sistema grande ya no tiene existencia -> se pone en 0.
       let puestosEnCero = 0;
-      for(const perm of permitidos){
-        if(nombresEnExcel.has(normalizeName(perm.nombre))) continue; // sí vino en el Excel
-        const existing = items.find(it=>normalizeName(it.name)===normalizeName(perm.nombre));
-        if(existing){
-          if(existing.qty !== 0){
-            existing.qty = 0;
-            await saveItem(existing);
+      if(!sinFiltro){
+        const nombresEnExcel = new Set(Object.keys(sums).map(n=>normalizeName(n)));
+        for(const perm of permitidos.filter(p=>p.grupo===currentStockBodega)){
+          if(nombresEnExcel.has(normalizeName(perm.nombre))) continue;
+          const existing = items.find(it=>it.grupo===currentStockBodega && normalizeName(it.name)===normalizeName(perm.nombre));
+          if(existing){
+            if(existing.qty !== 0){
+              existing.qty = 0;
+              await saveItem(existing);
+              puestosEnCero++;
+            }
+          } else {
+            const it = {id:uid(), name: perm.etiqueta || perm.nombre, qty:0, min: perm.min, grupo: currentStockBodega};
+            items.push(it);
+            await saveItem(it);
             puestosEnCero++;
           }
-        } else {
-          const it = {id:uid(), name: perm.etiqueta || perm.nombre, qty:0, min: perm.min, grupo: perm.grupo};
-          items.push(it);
-          await saveItem(it);
-          puestosEnCero++;
         }
       }
 
       if(!importados){
-        setStatus('uploadStatus','No se encontró ningún producto de tu lista permitida en este archivo. Revisa el panel admin.','err');
+        setStatus('uploadStatus', sinFiltro ? 'El archivo no tenía filas válidas.' : 'No se encontró ningún producto de tu lista permitida en este archivo. Revisa el panel admin.', 'err');
         return;
       }
 
       render();
-      let msg = `Se importaron ${importados} producto(s). Se ignoraron ${ignorados} que no están en la lista permitida.`;
+      let msg = sinFiltro
+        ? `Se importaron ${importados} producto(s) sin filtrar (bodega "${currentStockBodega}").`
+        : `Se importaron ${importados} producto(s). Se ignoraron ${ignorados} que no están en la lista permitida.`;
       if(puestosEnCero > 0) msg += ` ${puestosEnCero} producto(s) de tu lista no aparecían en el Excel y se pusieron en 0 (agotado).`;
       setStatus('uploadStatus', msg, 'ok');
     }catch(err){
@@ -975,9 +1065,10 @@ function handleFile(file){
 
 // ================== Productos permitidos (panel admin) ==================
 function renderPermitidos(){
+  renderPermitidosBodegaSelect();
   const tbody = document.getElementById('permitidosTbody');
   tbody.innerHTML = '';
-  permitidos.forEach(p=>{
+  permitidos.filter(p=>p.grupo===permitidosBodega).forEach(p=>{
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td data-label="Nombre exacto"><input type="text" value="${escapeHtml(p.nombre)}" data-pfield="nombre" data-pid="${p.id}" style="width:100%;font-family:var(--mono);"></td>
@@ -1019,7 +1110,7 @@ async function savePermitido(p){
 }
 
 document.getElementById('addPermitidoBtn').addEventListener('click', async ()=>{
-  const p = {id:uid(), nombre:'', etiqueta:'', min:10, grupo:'General'};
+  const p = {id:uid(), nombre:'', etiqueta:'', min:10, grupo:permitidosBodega};
   permitidos.push(p);
   renderPermitidos();
 });
@@ -1027,13 +1118,13 @@ document.getElementById('addPermitidoBtn').addEventListener('click', async ()=>{
 document.getElementById('bulkAddBtn').addEventListener('click', async ()=>{
   const raw = document.getElementById('bulkNames').value;
   const min = parseFloat(document.getElementById('bulkMin').value) || 10;
-  const grupo = 'General';
+  const grupo = permitidosBodega;
   const nombres = raw.split('\n').map(s=>s.trim()).filter(Boolean);
   if(!nombres.length){ setStatus('permitidosStatus','Pega al menos un nombre.','err'); return; }
 
   let agregados = 0;
   for(const nombre of nombres){
-    if(permitidos.some(p=>normalizeName(p.nombre)===normalizeName(nombre))) continue;
+    if(permitidos.some(p=>p.grupo===grupo && normalizeName(p.nombre)===normalizeName(nombre))) continue;
     const p = {id:uid(), nombre, etiqueta:nombre, min, grupo};
     permitidos.push(p);
     await savePermitido(p);
@@ -1041,7 +1132,96 @@ document.getElementById('bulkAddBtn').addEventListener('click', async ()=>{
   }
   renderPermitidos();
   document.getElementById('bulkNames').value = '';
-  setStatus('permitidosStatus', `Se agregaron ${agregados} producto(s) permitido(s).`, 'ok');
+  setStatus('permitidosStatus', `Se agregaron ${agregados} producto(s) permitido(s) en "${grupo}".`, 'ok');
+});
+
+// ================== Gestionar bodegas ==================
+function renderBodegasAdmin(){
+  const tbody = document.getElementById('bodegasTbody');
+  if(!tbody) return;
+  tbody.innerHTML = '';
+  bodegas.forEach(b=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td data-label="Nombre"><input type="text" value="${escapeHtml(b.nombre)}" data-bfield="nombre" data-bid="${b.id}" style="width:100%;"></td>
+      <td data-label="Tipo">
+        <select data-bfield="tipo" data-bid="${b.id}">
+          <option value="stock" ${b.tipo==='stock'?'selected':''}>Stock</option>
+          <option value="log" ${b.tipo==='log'?'selected':''}>Registro</option>
+        </select>
+      </td>
+      <td data-label="Alertas">
+        <select data-bfield="modoAlertas" data-bid="${b.id}">
+          <option value="automaticas" ${b.modoAlertas==='automaticas'?'selected':''}>Automáticas</option>
+          <option value="manual" ${b.modoAlertas==='manual'?'selected':''}>Solo manual</option>
+          <option value="ninguna" ${b.modoAlertas==='ninguna'?'selected':''}>Ninguna</option>
+        </select>
+      </td>
+      <td data-label="Oculta" style="text-align:center;"><input type="checkbox" data-bfield="oculta" data-bid="${b.id}" ${b.oculta?'checked':''}></td>
+      <td data-label="Sin filtro" style="text-align:center;"><input type="checkbox" data-bfield="sinFiltro" data-bid="${b.id}" ${b.sinFiltro?'checked':''} ${b.tipo!=='stock'?'disabled':''}></td>
+      <td data-label=""><button class="del" data-remove-bodega="${b.id}" title="Eliminar">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('[data-bfield]').forEach(inp=>{
+    inp.addEventListener('change', async (e)=>{
+      const b = bodegas.find(x=>x.id===e.target.dataset.bid);
+      if(!b) return;
+      const field = e.target.dataset.bfield;
+      b[field] = field==='oculta'||field==='sinFiltro' ? e.target.checked : e.target.value;
+      await saveBodega(b);
+      renderBodegasAdmin();
+      renderStockSwitcher();
+      renderLogSwitcher();
+    });
+  });
+
+  tbody.querySelectorAll('[data-remove-bodega]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.removeBodega;
+      const b = bodegas.find(x=>x.id===id);
+      if(!b) return;
+      if(!confirm(`¿Eliminar la bodega "${b.nombre}"? Esto NO borra los productos que ya tenga guardados, solo la bodega en sí (dejarían de tener a dónde pertenecer).`)) return;
+      bodegas = bodegas.filter(x=>x.id!==id);
+      renderBodegasAdmin();
+      renderStockSwitcher();
+      renderLogSwitcher();
+      try{ await sb.from('bodegas').delete().eq('id', id); }catch(e){}
+    });
+  });
+}
+
+async function saveBodega(b){
+  try{
+    const payload = { nombre:b.nombre, tipo:b.tipo, modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro };
+    if(b.id && b.id.length===36) payload.id = b.id;
+    const {data, error} = await sb.from('bodegas').upsert(payload, {onConflict:'nombre'}).select().single();
+    if(error) throw error;
+    b.id = data.id;
+    setStatus('bodegasStatus', 'Guardado.', 'ok');
+  }catch(e){
+    setStatus('bodegasStatus', 'Error: ' + e.message, 'err');
+  }
+}
+
+document.getElementById('addBodegaBtn').addEventListener('click', async ()=>{
+  const b = {id:uid(), nombre:'Nueva bodega', tipo:'stock', modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1};
+  bodegas.push(b);
+  renderBodegasAdmin();
+  await saveBodega(b);
+  renderStockSwitcher();
+  renderLogSwitcher();
+});
+
+function renderPermitidosBodegaSelect(){
+  const sel = document.getElementById('permitidosBodegaSelect');
+  const stockBodegas = bodegas.filter(b=>b.tipo==='stock');
+  sel.innerHTML = stockBodegas.map(b=>`<option value="${escapeHtml(b.nombre)}" ${b.nombre===permitidosBodega?'selected':''}>${escapeHtml(b.nombre)}${b.sinFiltro?' (sin filtro, no necesita lista)':''}</option>`).join('');
+}
+document.getElementById('permitidosBodegaSelect').addEventListener('change', (e)=>{
+  permitidosBodega = e.target.value;
+  renderPermitidos();
 });
 
 // ================== Destinatarios ==================
@@ -1060,8 +1240,42 @@ document.getElementById('recipientsLockBtn').addEventListener('click', ()=>{
   updateRecipientsVisibility(false);
 });
 
+// ================== Bodegas: selectores ==================
+function renderStockSwitcher(){
+  const box = document.getElementById('stockSwitcher');
+  if(!box) return;
+  const visibles = bodegas.filter(b => b.tipo==='stock' && (!b.oculta || isAdmin()));
+  box.innerHTML = visibles.map(b=>`
+    <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===currentStockBodega?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}</button>
+  `).join('');
+  box.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      currentStockBodega = btn.dataset.bod;
+      renderStockSwitcher();
+      render();
+    });
+  });
+}
+
+function renderLogSwitcher(){
+  const box = document.getElementById('logSwitcher');
+  if(!box) return;
+  const visibles = bodegas.filter(b => b.tipo==='log' && (!b.oculta || isAdmin()));
+  box.innerHTML = visibles.map(b=>`
+    <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===currentLogBodega?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}</button>
+  `).join('');
+  box.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      currentLogBodega = btn.dataset.bod;
+      renderLogSwitcher();
+      renderTroncal();
+    });
+  });
+}
+
 function renderRecipients(){
   updateRecipientsVisibility(isAdmin());
+  renderNewChatGroupsBox();
   const box = document.getElementById('recipientsList');
   if(!recipients.length){ box.innerHTML = '<span class="note" style="margin:0;">No hay destinatarios.</span>'; return; }
   box.innerHTML = recipients.map(r=>`
@@ -1091,12 +1305,23 @@ function renderRecipients(){
   });
 }
 
+function renderNewChatGroupsBox(){
+  const box = document.getElementById('newChatGroupsBox');
+  if(!box) return;
+  box.innerHTML = bodegas.map(b=>`
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-mut);cursor:pointer;">
+      <input type="checkbox" value="${escapeHtml(b.nombre)}" class="new-chat-grp" checked> ${escapeHtml(b.nombre)}
+    </label>
+  `).join('');
+}
+
 document.getElementById('addRecipientBtn').addEventListener('click', async ()=>{
   const chatId = document.getElementById('newChatId').value.trim();
   const nombre = document.getElementById('newChatName').value.trim();
-  const grupos = document.getElementById('newChatGroups').value.split(',');
+  const grupos = Array.from(document.querySelectorAll('.new-chat-grp:checked')).map(el=>el.value);
   const recibeAuto = document.getElementById('newChatAuto').value === 'si';
   if(!chatId || !/^-?\d+$/.test(chatId)){ setStatus('recipientsStatus','Escribe un chat_id válido.','err'); return; }
+  if(!grupos.length){ setStatus('recipientsStatus','Elige al menos una bodega/grupo.','err'); return; }
   if(recipients.some(r=>r.chatId===chatId)){ setStatus('recipientsStatus','Ese chat_id ya está agregado.','err'); return; }
   try{
     const {data, error} = await sb.from('destinatarios').insert({chat_id:chatId, nombre, grupos, recibe_automaticas:recibeAuto}).select().single();
@@ -1171,7 +1396,8 @@ function renderTroncal(){
   const tbody = document.getElementById('troncalTbody');
   tbody.innerHTML = '';
   const q = normalizeName(troncalSearch);
-  const visibles = q ? troncalEntries.filter(en => normalizeName(en.material||'').includes(q)) : troncalEntries;
+  let visibles = troncalEntries.filter(en => en.bodega === currentLogBodega);
+  if(q) visibles = visibles.filter(en => normalizeName(en.material||'').includes(q));
   visibles.forEach(en=>{
     const tr = document.createElement('tr');
     const dis = editable ? '' : 'disabled';
@@ -1218,7 +1444,8 @@ async function saveTroncal(en){
       material: en.material || '', metros: en.metros || 0,
       entregado_a: en.entregadoA || null, fecha: en.fecha || null,
       devuelto: en.devuelto || 0,
-      observacion: en.observacion || null
+      observacion: en.observacion || null,
+      bodega: en.bodega || currentLogBodega
     };
     if(en.id && en.id.length===36) payload.id = en.id;
     const {data, error} = await sb.from('troncal_entregas').upsert(payload).select().single();
@@ -1261,7 +1488,8 @@ document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
     entregadoA: tecnico.trim(),
     fecha: '',
     devuelto: 0,
-    observacion: ''
+    observacion: '',
+    bodega: currentLogBodega
   };
   troncalEntries.unshift(en);
   renderTroncal();
@@ -1271,7 +1499,7 @@ document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
 });
 
 document.getElementById('cleanDatesBtn').addEventListener('click', async ()=>{
-  const afectadas = troncalEntries.filter(en => !en.entregadoA && en.fecha);
+  const afectadas = troncalEntries.filter(en => en.bodega === currentLogBodega && !en.entregadoA && en.fecha);
   if(!afectadas.length){
     setStatus('troncalAlertStatus', 'No hay fechas sueltas para limpiar (todas están vacías o ya tienen técnico asignado).', 'ok');
     return;
@@ -1293,7 +1521,7 @@ document.getElementById('troncalBulkAddBtn').addEventListener('click', async ()=
 
   let agregados = 0;
   for(const material of nombres){
-    const en = {id:uid(), material, metros:0, entregadoA:'', fecha:'', devuelto:0, observacion:''};
+    const en = {id:uid(), material, metros:0, entregadoA:'', fecha:'', devuelto:0, observacion:'', bodega:currentLogBodega};
     troncalEntries.unshift(en);
     await saveTroncal(en);
     agregados++;
@@ -1306,12 +1534,129 @@ document.getElementById('troncalBulkAddBtn').addEventListener('click', async ()=
 document.getElementById('sendTroncalLogBtn').addEventListener('click', async ()=>{
   setStatus('troncalAlertStatus', 'Enviando...', '');
   try{
-    const {error} = await sb.rpc('enviar_reporte_troncal');
+    const {error} = await sb.rpc('enviar_reporte_troncal', {bodega_filtro: currentLogBodega});
     if(error) throw error;
     setStatus('troncalAlertStatus', 'Registro enviado a Telegram.', 'ok');
   }catch(e){
     setStatus('troncalAlertStatus', 'Error: ' + e.message, 'err');
   }
+});
+
+// ================== Historial de cambios ==================
+async function cargarHistorial(){
+  const box = document.getElementById('historialList');
+  box.innerHTML = '<span class="note" style="margin:0;">Cargando…</span>';
+  try{
+    const {data, error} = await sb.from('historial').select('*').order('creado_en', {ascending:false}).limit(150);
+    if(error) throw error;
+    if(!data.length){ box.innerHTML = '<span class="note" style="margin:0;">Todavía no hay historial.</span>'; return; }
+    box.innerHTML = data.map(h=>{
+      const fecha = new Date(h.creado_en).toLocaleString('es-CO', {dateStyle:'short', timeStyle:'short'});
+      const color = h.accion==='crear' ? 'ok' : h.accion==='eliminar' ? 'low' : 'warn';
+      const etiquetaTabla = h.tabla==='productos' ? 'Inventario' : 'Troncal';
+      return `
+        <div style="padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;">
+            <span class="badge ${color}">${h.accion}</span>
+            <span style="color:var(--text-dim);font-size:11px;">${fecha} · ${etiquetaTabla}</span>
+          </div>
+          <div style="margin-top:4px;"><b>${escapeHtml(h.nombre_registro||'')}</b> — ${escapeHtml(h.detalle||'')}</div>
+        </div>
+      `;
+    }).join('');
+  }catch(e){
+    box.innerHTML = `<span class="note" style="margin:0;color:var(--red);">Error: ${escapeHtml(e.message)}</span>`;
+  }
+}
+document.getElementById('refreshHistorialBtn').addEventListener('click', cargarHistorial);
+
+// ================== Consultar disponibilidad (texto o imagen) ==================
+document.getElementById('dispoImagenBtn').addEventListener('click', ()=>document.getElementById('dispoImagenInput').click());
+
+document.getElementById('dispoImagenInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  setStatus('dispoOcrStatus', 'Leyendo texto de la imagen (puede tardar unos segundos)…', '');
+  try{
+    const { data: { text } } = await Tesseract.recognize(file, 'spa');
+    const actual = document.getElementById('dispoTexto').value.trim();
+    document.getElementById('dispoTexto').value = actual ? actual + '\n' + text : text;
+    setStatus('dispoOcrStatus', 'Texto extraído de la imagen. Revísalo y dale "Buscar disponibilidad".', 'ok');
+  }catch(err){
+    console.error(err);
+    setStatus('dispoOcrStatus', 'No se pudo leer el texto de esa imagen. Intenta con una más nítida, o escribe el pedido a mano.', 'err');
+  }
+});
+
+// Pegar imagen directo con Ctrl+V dentro del cuadro de texto
+document.getElementById('dispoTexto').addEventListener('paste', async (e)=>{
+  const items = Array.from(e.clipboardData.items || []);
+  const img = items.find(it=>it.type.startsWith('image/'));
+  if(!img) return; // pegado de texto normal, no hacer nada especial
+  e.preventDefault();
+  const file = img.getAsFile();
+  setStatus('dispoOcrStatus', 'Leyendo texto de la imagen pegada…', '');
+  try{
+    const { data: { text } } = await Tesseract.recognize(file, 'spa');
+    const actual = document.getElementById('dispoTexto').value.trim();
+    document.getElementById('dispoTexto').value = actual ? actual + '\n' + text : text;
+    setStatus('dispoOcrStatus', 'Texto extraído de la imagen. Revísalo y dale "Buscar disponibilidad".', 'ok');
+  }catch(err){
+    console.error(err);
+    setStatus('dispoOcrStatus', 'No se pudo leer el texto de esa imagen.', 'err');
+  }
+});
+
+function palabrasClave(texto){
+  const stop = new Set(['de','la','el','los','las','un','una','y','o','para','con','en','del','al','que','se','necesito','necesitamos','pedido','favor','porfa','porfavor','urgente','envio','envío','material','materiales']);
+  return normalizeName(texto).split(/[^a-z0-9áéíóúñ]+/i).filter(w=>w.length>=3 && !stop.has(w));
+}
+
+document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
+  const texto = document.getElementById('dispoTexto').value.trim();
+  if(!texto){ setStatus('dispoOcrStatus','Pega o escribe el pedido primero.','err'); return; }
+  const palabras = palabrasClave(texto);
+  if(!palabras.length){ setStatus('dispoOcrStatus','No encontré palabras suficientes para buscar.','err'); return; }
+
+  // Trae TODOS los productos de TODAS las bodegas tipo stock, no solo la que estás viendo
+  let todos = [];
+  try{
+    const {data, error} = await sb.from('productos').select('*');
+    if(error) throw error;
+    todos = (data||[]).map(r=>({name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+  }catch(e){
+    setStatus('dispoOcrStatus','No se pudo consultar el inventario: ' + e.message, 'err');
+    return;
+  }
+
+  const resultados = todos.map(it=>{
+    const nombreNorm = normalizeName(it.name);
+    const coincidencias = palabras.filter(p=>nombreNorm.includes(p)).length;
+    return {it, coincidencias};
+  }).filter(r=>r.coincidencias>0).sort((a,b)=>b.coincidencias-a.coincidencias);
+
+  const box = document.getElementById('dispoResultados');
+  if(!resultados.length){
+    box.innerHTML = '<p class="note" style="margin:0;">No encontré ningún producto parecido a ese pedido en ninguna bodega.</p>';
+    setStatus('dispoOcrStatus', '', '');
+    return;
+  }
+
+  box.innerHTML = resultados.slice(0,25).map(({it})=>{
+    const st = statusOf(it);
+    const estado = st==='low' ? 'Agotado — hay que comprar' : st==='warn' ? 'Por acabarse' : 'Disponible';
+    const clase = st==='low' ? 'low' : st==='warn' ? 'warn' : 'ok';
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px;">
+        <div><b>${escapeHtml(it.name)}</b><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(it.grupo)}</span></div>
+        <div style="text-align:right;">
+          <div class="badge ${clase}">${estado}</div>
+          <div style="color:var(--text-mut);font-size:11.5px;margin-top:3px;">${it.qty} disponibles</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  setStatus('dispoOcrStatus', `${resultados.length} resultado(s) encontrado(s).`, 'ok');
 });
 
 // ================== Navegación por pestañas + panel admin oculto ==================
@@ -1342,6 +1687,7 @@ document.getElementById('adminGearBtn').addEventListener('click', ()=>{
   if(!requireAdmin()) return;
   render();
   renderTroncal();
+  cargarHistorial();
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>{ p.style.display = (p.dataset.panel==='admin') ? '' : 'none'; });
   window.scrollTo({top:0, behavior:'instant'});
@@ -1458,7 +1804,7 @@ function handleTroncalFile(file){
         const material = String(r[nameCol]||'').trim();
         if(!material) continue;
         const metros = parseFloat(r[metrosCol]);
-        const en = {id:uid(), material, metros: isNaN(metros)?0:metros, entregadoA:'', fecha:'', devuelto:0, observacion:''};
+        const en = {id:uid(), material, metros: isNaN(metros)?0:metros, entregadoA:'', fecha:'', devuelto:0, observacion:'', bodega:currentLogBodega};
         troncalEntries.unshift(en);
         await saveTroncal(en);
         agregados++;
@@ -1528,14 +1874,15 @@ async function descargarExcelFormateado({titulo, columnas, filas, coloresEstado}
 }
 
 document.getElementById('exportInvBtn').addEventListener('click', async ()=>{
-  if(!items.length){ setStatus('uploadStatus','No hay materiales para exportar.','err'); return; }
-  const filas = items.map(it=>{
+  const enBodega = items.filter(it=>it.grupo===currentStockBodega);
+  if(!enBodega.length){ setStatus('uploadStatus','No hay materiales para exportar en esta bodega.','err'); return; }
+  const filas = enBodega.map(it=>{
     const st = statusOf(it);
     const estado = st==='low' ? 'AGOTADO' : st==='warn' ? 'POR ACABARSE' : 'OK';
     return [it.name, it.qty, estado];
   });
   await descargarExcelFormateado({
-    titulo: 'TABLA DE CONTEO DE MATERIALES – INVENTARIO GENERAL',
+    titulo: `TABLA DE CONTEO DE MATERIALES – ${currentStockBodega.toUpperCase()}`,
     columnas: ['MATERIAL','CANTIDAD EN INVENTARIO','ESTADO'],
     filas,
     coloresEstado: {
@@ -1551,12 +1898,13 @@ document.getElementById('exportInvBtn').addEventListener('click', async ()=>{
 });
 
 document.getElementById('exportTroncalBtn').addEventListener('click', async ()=>{
-  if(!troncalEntries.length){ setStatus('troncalAlertStatus','No hay entregas para exportar.','err'); return; }
-  const filas = troncalEntries.map(en=>[
+  const filasBodega = troncalEntries.filter(en=>en.bodega===currentLogBodega);
+  if(!filasBodega.length){ setStatus('troncalAlertStatus','No hay entregas para exportar.','err'); return; }
+  const filas = filasBodega.map(en=>[
     en.material, en.metros, en.entregadoA || '', en.fecha || '', en.observacion || ''
   ]);
   await descargarExcelFormateado({
-    titulo: 'REGISTRO DE ENTREGAS – TRONCAL',
+    titulo: `REGISTRO DE ENTREGAS – ${currentLogBodega.toUpperCase()}`,
     columnas: ['MATERIAL','METROS','ENTREGADO A','FECHA','OBSERVACIÓN / DEVUELTO'],
     filas
   });
