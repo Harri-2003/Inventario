@@ -334,11 +334,7 @@
   <nav class="tabs" id="tabsNav">
     <button class="tab-btn active" data-tab="inventario">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
-      <span class="tab-label">Inventario</span>
-    </button>
-    <button class="tab-btn" data-tab="troncal">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 6a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2M4 6v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6"/><path d="M9 14h6"/></svg>
-      <span class="tab-label">Troncal</span>
+      <span class="tab-label">Bodegas</span>
     </button>
     <button class="tab-btn" data-tab="alertas">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
@@ -397,9 +393,9 @@
           </div>
         </div>
       </div>
-    </section>
 
-    <section class="tab-panel" data-panel="troncal" style="display:none">
+      <div style="height:2px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);opacity:0.5;margin:22px 0;"></div>
+
       <div class="card">
         <h2 style="justify-content:space-between;cursor:pointer;" id="troncalCollapseToggle">
           <span>Registro de entregas — Troncal</span>
@@ -852,8 +848,14 @@ function render(){
 async function saveItem(it){
   try{
     const payload = { nombre: it.name, cantidad: it.qty, minimo: it.min, grupo: it.grupo || 'General' };
-    if(it.id && it.id.length===36) payload.id = it.id;
-    const {data, error} = await sb.from('productos').upsert(payload, {onConflict:'nombre'}).select().single();
+    let query;
+    if(it.id && it.id.length===36){
+      payload.id = it.id;
+      query = sb.from('productos').upsert(payload); // ya existe -> actualiza por id (llave primaria)
+    } else {
+      query = sb.from('productos').upsert(payload, {onConflict:'nombre'}); // nuevo -> fusiona si ya existe ese nombre
+    }
+    const {data, error} = await query.select().single();
     if(error) throw error;
     it.id = data.id; // asegura que el objeto local quede con el id real de Supabase
     setConnLed('ok');
@@ -1102,8 +1104,14 @@ function renderPermitidos(){
 async function savePermitido(p){
   try{
     const payload = { nombre_exacto: p.nombre, etiqueta: p.etiqueta || p.nombre, minimo_defecto: p.min, grupo: p.grupo };
-    if(p.id && p.id.length===36) payload.id = p.id;
-    const {data, error} = await sb.from('productos_permitidos').upsert(payload, {onConflict:'nombre_exacto'}).select().single();
+    let query;
+    if(p.id && p.id.length===36){
+      payload.id = p.id;
+      query = sb.from('productos_permitidos').upsert(payload);
+    } else {
+      query = sb.from('productos_permitidos').upsert(payload, {onConflict:'nombre_exacto'});
+    }
+    const {data, error} = await query.select().single();
     if(error) throw error;
     p.id = data.id;
   }catch(e){ console.error(e); }
@@ -1195,8 +1203,14 @@ function renderBodegasAdmin(){
 async function saveBodega(b){
   try{
     const payload = { nombre:b.nombre, tipo:b.tipo, modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro };
-    if(b.id && b.id.length===36) payload.id = b.id;
-    const {data, error} = await sb.from('bodegas').upsert(payload, {onConflict:'nombre'}).select().single();
+    let query;
+    if(b.id && b.id.length===36){
+      payload.id = b.id;
+      query = sb.from('bodegas').upsert(payload); // ya existe -> actualiza por id, no por nombre
+    } else {
+      query = sb.from('bodegas').upsert(payload, {onConflict:'nombre'});
+    }
+    const {data, error} = await query.select().single();
     if(error) throw error;
     b.id = data.id;
     setStatus('bodegasStatus', 'Guardado.', 'ok');
@@ -1618,45 +1632,73 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
   const palabras = palabrasClave(texto);
   if(!palabras.length){ setStatus('dispoOcrStatus','No encontré palabras suficientes para buscar.','err'); return; }
 
-  // Trae TODOS los productos de TODAS las bodegas tipo stock, no solo la que estás viendo
-  let todos = [];
+  // Trae TODOS los productos (bodegas tipo Stock) y TODAS las entregas (bodegas tipo Registro)
+  let todosStock = [], todosLog = [];
   try{
-    const {data, error} = await sb.from('productos').select('*');
-    if(error) throw error;
-    todos = (data||[]).map(r=>({name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+    const [prod, tron] = await Promise.all([
+      sb.from('productos').select('*'),
+      sb.from('troncal_entregas').select('*')
+    ]);
+    if(prod.error) throw prod.error;
+    if(tron.error) throw tron.error;
+    todosStock = (prod.data||[]).map(r=>({name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+    todosLog = (tron.data||[]).map(r=>({name:r.material, metros:Number(r.metros), grupo:r.bodega||'Troncal', entregadoA:r.entregado_a}));
   }catch(e){
     setStatus('dispoOcrStatus','No se pudo consultar el inventario: ' + e.message, 'err');
     return;
   }
 
-  const resultados = todos.map(it=>{
+  const resultadosStock = todosStock.map(it=>{
+    const nombreNorm = normalizeName(it.name);
+    const coincidencias = palabras.filter(p=>nombreNorm.includes(p)).length;
+    return {it, coincidencias};
+  }).filter(r=>r.coincidencias>0).sort((a,b)=>b.coincidencias-a.coincidencias);
+
+  const resultadosLog = todosLog.map(it=>{
     const nombreNorm = normalizeName(it.name);
     const coincidencias = palabras.filter(p=>nombreNorm.includes(p)).length;
     return {it, coincidencias};
   }).filter(r=>r.coincidencias>0).sort((a,b)=>b.coincidencias-a.coincidencias);
 
   const box = document.getElementById('dispoResultados');
-  if(!resultados.length){
+  if(!resultadosStock.length && !resultadosLog.length){
     box.innerHTML = '<p class="note" style="margin:0;">No encontré ningún producto parecido a ese pedido en ninguna bodega.</p>';
     setStatus('dispoOcrStatus', '', '');
     return;
   }
 
-  box.innerHTML = resultados.slice(0,25).map(({it})=>{
-    const st = statusOf(it);
-    const estado = st==='low' ? 'Agotado — hay que comprar' : st==='warn' ? 'Por acabarse' : 'Disponible';
-    const clase = st==='low' ? 'low' : st==='warn' ? 'warn' : 'ok';
-    return `
+  let html = '';
+  if(resultadosStock.length){
+    html += '<p class="note" style="margin:0 0 6px;font-weight:600;">Bodegas tipo Stock:</p>';
+    html += resultadosStock.slice(0,25).map(({it})=>{
+      const st = statusOf(it);
+      const estado = st==='low' ? 'Agotado — hay que comprar' : st==='warn' ? 'Por acabarse' : 'Disponible';
+      const clase = st==='low' ? 'low' : st==='warn' ? 'warn' : 'ok';
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px;">
+          <div><b>${escapeHtml(it.name)}</b><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(it.grupo)}</span></div>
+          <div style="text-align:right;">
+            <div class="badge ${clase}">${estado}</div>
+            <div style="color:var(--text-mut);font-size:11.5px;margin-top:3px;">${it.qty} disponibles</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  if(resultadosLog.length){
+    html += '<p class="note" style="margin:14px 0 6px;font-weight:600;">Bodegas tipo Registro (Troncal):</p>';
+    html += resultadosLog.slice(0,25).map(({it})=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px;">
         <div><b>${escapeHtml(it.name)}</b><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(it.grupo)}</span></div>
         <div style="text-align:right;">
-          <div class="badge ${clase}">${estado}</div>
-          <div style="color:var(--text-mut);font-size:11.5px;margin-top:3px;">${it.qty} disponibles</div>
+          <div class="badge ${it.entregadoA?'warn':'ok'}">${it.entregadoA?('Entregado a '+escapeHtml(it.entregadoA)):'En bodega'}</div>
+          <div style="color:var(--text-mut);font-size:11.5px;margin-top:3px;">${it.metros} metros</div>
         </div>
       </div>
-    `;
-  }).join('');
-  setStatus('dispoOcrStatus', `${resultados.length} resultado(s) encontrado(s).`, 'ok');
+    `).join('');
+  }
+  box.innerHTML = html;
+  setStatus('dispoOcrStatus', `${resultadosStock.length + resultadosLog.length} resultado(s) encontrado(s).`, 'ok');
 });
 
 // ================== Navegación por pestañas + panel admin oculto ==================
