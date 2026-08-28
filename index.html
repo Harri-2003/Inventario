@@ -1300,20 +1300,52 @@ document.getElementById('recipientsLockBtn').addEventListener('click', ()=>{
 });
 
 // ================== Bodegas: selectores ==================
+async function crearBodegaRapida(){
+  if(!requireAdmin()) return;
+  const nombre = window.prompt('Nombre de la nueva bodega:');
+  if(!nombre || !nombre.trim()) return;
+  if(bodegas.some(b=>normalizeName(b.nombre)===normalizeName(nombre.trim()))){
+    alert(`Ya existe una bodega llamada "${nombre.trim()}". Usa un nombre distinto.`);
+    return;
+  }
+  const esStock = confirm(
+    '¿Cómo va a funcionar esta bodega?\n\n' +
+    'Aceptar = INVENTARIO (con mínimos y estado Agotado/Por acabarse/Ok)\n' +
+    'Cancelar = TRONCAL (registro/bitácora, sin mínimos)'
+  );
+  const b = {id:uid(), nombre:nombre.trim(), tipo: esStock?'stock':'log', modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1};
+  bodegas.push(b);
+  await saveBodega(b);
+  renderBodegasAdmin();
+  renderHistorialBodegaSelect();
+  renderNewChatGroupsBox();
+  if(esStock){
+    currentStockBodega = b.nombre;
+    renderStockSwitcher();
+    render();
+  } else {
+    currentLogBodega = b.nombre;
+    renderLogSwitcher();
+    renderTroncal();
+  }
+}
+
 function renderStockSwitcher(){
   const box = document.getElementById('stockSwitcher');
   if(!box) return;
   const visibles = bodegas.filter(b => b.tipo==='stock' && (!b.oculta || isAdmin()));
   box.innerHTML = visibles.map(b=>`
     <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===currentStockBodega?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}</button>
-  `).join('');
-  box.querySelectorAll('button').forEach(btn=>{
+  `).join('') + `<button data-nueva-bodega-stock title="Crear otra bodega (elige tipo)">+ Nueva bodega</button>`;
+  box.querySelectorAll('[data-bod]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       currentStockBodega = btn.dataset.bod;
       renderStockSwitcher();
       render();
     });
   });
+  const nuevaBtn = box.querySelector('[data-nueva-bodega-stock]');
+  if(nuevaBtn) nuevaBtn.addEventListener('click', crearBodegaRapida);
 }
 
 function renderLogSwitcher(){
@@ -1322,14 +1354,16 @@ function renderLogSwitcher(){
   const visibles = bodegas.filter(b => b.tipo==='log' && (!b.oculta || isAdmin()));
   box.innerHTML = visibles.map(b=>`
     <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===currentLogBodega?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}</button>
-  `).join('');
-  box.querySelectorAll('button').forEach(btn=>{
+  `).join('') + `<button data-nueva-bodega-log title="Crear otra bodega (elige tipo)">+ Nueva bodega</button>`;
+  box.querySelectorAll('[data-bod]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       currentLogBodega = btn.dataset.bod;
       renderLogSwitcher();
       renderTroncal();
     });
   });
+  const nuevaBtn = box.querySelector('[data-nueva-bodega-log]');
+  if(nuevaBtn) nuevaBtn.addEventListener('click', crearBodegaRapida);
 }
 
 function renderRecipients(){
@@ -1720,10 +1754,14 @@ document.getElementById('dispoTexto').addEventListener('paste', async (e)=>{
 
 function palabrasClave(texto){
   const stop = new Set(['de','la','el','los','las','un','una','y','o','para','con','en','del','al','que','se','necesito','necesitamos','pedido','favor','porfa','porfavor','urgente','envio','envío','material','materiales']);
-  return normalizeName(texto).split(/[^a-z0-9áéíóúñ]+/i).filter(w=>{
+  // separa números pegados a letras ("10cm" -> "10 cm") para que calce con nombres reales como "10 Cm"
+  const conEspacios = texto
+    .replace(/(\d)([a-záéíóúñ])/gi, '$1 $2')
+    .replace(/([a-záéíóúñ])(\d)/gi, '$1 $2');
+  return normalizeName(conEspacios).split(/[^a-z0-9áéíóúñ]+/i).filter(w=>{
     if(!w || stop.has(w)) return false;
     if(/^[0-9]+$/.test(w)) return true; // los números cuentan aunque sean cortos (ej: "24")
-    return w.length>=3;
+    return w.length>=2; // incluye unidades cortas como "cm", "mm"
   });
 }
 
@@ -1751,19 +1789,25 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
     return;
   }
 
-  // Coincidencia estricta: primero exige TODAS las palabras (ej: "24" Y "hilos" a la vez).
-  // Solo si eso no encuentra nada, se relaja a "al menos una palabra" como respaldo.
+  // Coincidencia estricta: primero exige TODAS las palabras a la vez (ej: "amarra" Y "10" Y "cm" Y "blanca").
+  // Solo si eso no encuentra nada, se relaja a "más de la mitad de las palabras" (nunca a solo 1, para evitar
+  // que una sola palabra genérica como "blanca" traiga productos que no tienen nada que ver).
+  function coincideConProducto(palabraBusqueda, palabrasProducto){
+    // "amarras" (búsqueda, plural) sí debe calzar con "amarra" (producto, singular) y viceversa
+    return palabrasProducto.some(pw => pw.includes(palabraBusqueda) || palabraBusqueda.includes(pw));
+  }
+
   function buscarEnLista(lista){
-    const conTodas = lista.filter(it => {
-      const n = normalizeName(it.name);
-      return palabras.every(p => n.includes(p));
-    });
-    if(conTodas.length) return conTodas.map(it=>({it, coincidencias:palabras.length}));
-    return lista.map(it=>{
-      const n = normalizeName(it.name);
-      const coincidencias = palabras.filter(p=>n.includes(p)).length;
+    const scored = lista.map(it=>{
+      const palabrasProducto = normalizeName(it.name).split(/\s+/).filter(Boolean);
+      const coincidencias = palabras.filter(p=>coincideConProducto(p, palabrasProducto)).length;
       return {it, coincidencias};
-    }).filter(r=>r.coincidencias>0).sort((a,b)=>b.coincidencias-a.coincidencias);
+    });
+    const conTodas = scored.filter(r=>r.coincidencias===palabras.length);
+    if(conTodas.length) return conTodas.sort((a,b)=>a.it.name.localeCompare(b.it.name));
+    if(palabras.length===1) return []; // una sola palabra y no calzó exacto -> mejor no mostrar nada suelto
+    const minRequerido = Math.max(2, Math.ceil(palabras.length*0.6));
+    return scored.filter(r=>r.coincidencias>=minRequerido).sort((a,b)=>b.coincidencias-a.coincidencias);
   }
 
   const resultadosStock = buscarEnLista(todosStock);
