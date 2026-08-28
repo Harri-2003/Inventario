@@ -626,7 +626,14 @@
         <h2>Historial de cambios</h2>
         <p class="note">Cada vez que se crea, edita o borra un producto o una entrega de troncal, queda aquí. Guardado en Supabase, no en tu navegador.</p>
         <div class="row" style="margin-bottom:12px;">
-          <button id="refreshHistorialBtn">🔄 Actualizar</button>
+          <div class="field" style="max-width:220px;">
+            <label>Filtrar por bodega</label>
+            <select id="historialBodegaSelect">
+              <option value="">Todas las bodegas</option>
+            </select>
+          </div>
+          <button id="refreshHistorialBtn" style="align-self:flex-end;">🔄 Actualizar</button>
+          <button class="danger-btn" id="clearHistorialBtn" style="align-self:flex-end;">Borrar lo filtrado</button>
         </div>
         <div id="historialList" style="max-height:420px;overflow-y:auto;"></div>
       </div>
@@ -635,12 +642,13 @@
         <h2>Consultar disponibilidad (texto o imagen)</h2>
         <p class="note">
           Pega el texto de un pedido, o pega/sube una imagen (se lee el texto automáticamente).
-          Busca en TODAS las bodegas tipo Stock y te dice qué hay, cuánto, y su estado.
+          Busca en TODAS las bodegas tipo Stock y Registro, y te dice qué hay, cuánto, y su estado.
         </p>
-        <textarea id="dispoTexto" placeholder="Pega aquí el mensaje del pedido, ej: 'necesito amarras blancas de 10cm y conectores verdes'"></textarea>
+        <textarea id="dispoTexto" style="min-height:160px;" placeholder="Pega aquí el mensaje del pedido, ej: 'necesito amarras blancas de 10cm y conectores verdes'"></textarea>
         <div class="row" style="margin-top:10px;">
           <button id="dispoImagenBtn">🖼️ Pegar/subir imagen</button>
           <button class="primary" id="dispoBuscarBtn">Buscar disponibilidad</button>
+          <button id="dispoDescargarBtn">⬇ Descargar resultados</button>
         </div>
         <input type="file" id="dispoImagenInput" class="hidden-input" accept="image/*">
         <div class="status" id="dispoOcrStatus"></div>
@@ -1156,10 +1164,10 @@ function renderBodegasAdmin(){
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td data-label="Nombre"><input type="text" value="${escapeHtml(b.nombre)}" data-bfield="nombre" data-bid="${b.id}" style="width:100%;"></td>
-      <td data-label="Tipo">
+      <td data-label="Para">
         <select data-bfield="tipo" data-bid="${b.id}">
-          <option value="stock" ${b.tipo==='stock'?'selected':''}>Stock</option>
-          <option value="log" ${b.tipo==='log'?'selected':''}>Registro</option>
+          <option value="stock" ${b.tipo==='stock'?'selected':''}>Inventario (con mínimos)</option>
+          <option value="log" ${b.tipo==='log'?'selected':''}>Troncal (registro/bitácora)</option>
         </select>
       </td>
       <td data-label="Alertas">
@@ -1171,21 +1179,47 @@ function renderBodegasAdmin(){
       </td>
       <td data-label="Oculta" style="text-align:center;"><input type="checkbox" data-bfield="oculta" data-bid="${b.id}" ${b.oculta?'checked':''}></td>
       <td data-label="Sin filtro" style="text-align:center;"><input type="checkbox" data-bfield="sinFiltro" data-bid="${b.id}" ${b.sinFiltro?'checked':''} ${b.tipo!=='stock'?'disabled':''}></td>
-      <td data-label=""><button class="del" data-remove-bodega="${b.id}" title="Eliminar">✕</button></td>
+      <td data-label="">
+        <button class="primary" data-guardar-bodega="${b.id}" style="font-size:11px;padding:6px 10px;">💾 Guardar</button>
+        <button class="del" data-remove-bodega="${b.id}" title="Eliminar">✕</button>
+      </td>
     `;
     tbody.appendChild(tr);
   });
 
+  // Los campos solo actualizan el valor en memoria; el guardado real es con el botón "Guardar"
   tbody.querySelectorAll('[data-bfield]').forEach(inp=>{
-    inp.addEventListener('change', async (e)=>{
+    inp.addEventListener('change', (e)=>{
       const b = bodegas.find(x=>x.id===e.target.dataset.bid);
       if(!b) return;
       const field = e.target.dataset.bfield;
       b[field] = field==='oculta'||field==='sinFiltro' ? e.target.checked : e.target.value;
+      if(field==='tipo'){
+        // "sin filtro" solo aplica a tipo Inventario; refresca para des/habilitar el checkbox
+        renderBodegasAdmin();
+      }
+    });
+  });
+
+  tbody.querySelectorAll('[data-guardar-bodega]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const b = bodegas.find(x=>x.id===btn.dataset.guardarBodega);
+      if(!b) return;
+      if(!b.nombre || !b.nombre.trim()){
+        setStatus('bodegasStatus', 'El nombre no puede quedar vacío.', 'err');
+        return;
+      }
+      const nombreDuplicado = bodegas.some(x=>x.id!==b.id && normalizeName(x.nombre)===normalizeName(b.nombre));
+      if(nombreDuplicado){
+        setStatus('bodegasStatus', `Ya existe otra bodega llamada "${b.nombre}". Usa un nombre distinto.`, 'err');
+        return;
+      }
       await saveBodega(b);
       renderBodegasAdmin();
       renderStockSwitcher();
       renderLogSwitcher();
+      renderHistorialBodegaSelect();
+      renderNewChatGroupsBox();
     });
   });
 
@@ -1224,12 +1258,19 @@ async function saveBodega(b){
 }
 
 document.getElementById('addBodegaBtn').addEventListener('click', async ()=>{
-  const b = {id:uid(), nombre:'Nueva bodega', tipo:'stock', modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1};
+  let nombreBase = 'Nueva bodega', n = 1;
+  while(bodegas.some(x=>normalizeName(x.nombre)===normalizeName(n===1?nombreBase:`${nombreBase} ${n}`))) n++;
+  const nombre = n===1 ? nombreBase : `${nombreBase} ${n}`;
+  const b = {id:uid(), nombre, tipo:'stock', modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1};
   bodegas.push(b);
   renderBodegasAdmin();
   await saveBodega(b);
+  renderBodegasAdmin();
   renderStockSwitcher();
   renderLogSwitcher();
+  renderHistorialBodegaSelect();
+  renderNewChatGroupsBox();
+  setStatus('bodegasStatus', `Bodega "${nombre}" creada. Cámbiale el nombre y dale "💾 Guardar".`, 'ok');
 });
 
 function renderPermitidosBodegaSelect(){
@@ -1561,32 +1602,84 @@ document.getElementById('sendTroncalLogBtn').addEventListener('click', async ()=
 });
 
 // ================== Historial de cambios ==================
+let ultimoHistorial = [];
+
+function renderHistorialBodegaSelect(){
+  const sel = document.getElementById('historialBodegaSelect');
+  const actual = sel.value;
+  sel.innerHTML = '<option value="">Todas las bodegas</option>' +
+    bodegas.map(b=>`<option value="${escapeHtml(b.nombre)}">${escapeHtml(b.nombre)}</option>`).join('');
+  sel.value = actual || '';
+}
+
 async function cargarHistorial(){
+  renderHistorialBodegaSelect();
   const box = document.getElementById('historialList');
   box.innerHTML = '<span class="note" style="margin:0;">Cargando…</span>';
   try{
-    const {data, error} = await sb.from('historial').select('*').order('creado_en', {ascending:false}).limit(150);
+    const {data, error} = await sb.from('historial').select('*').order('creado_en', {ascending:false}).limit(300);
     if(error) throw error;
-    if(!data.length){ box.innerHTML = '<span class="note" style="margin:0;">Todavía no hay historial.</span>'; return; }
-    box.innerHTML = data.map(h=>{
-      const fecha = new Date(h.creado_en).toLocaleString('es-CO', {dateStyle:'short', timeStyle:'short'});
-      const color = h.accion==='crear' ? 'ok' : h.accion==='eliminar' ? 'low' : 'warn';
-      const etiquetaTabla = h.tabla==='productos' ? 'Inventario' : 'Troncal';
-      return `
-        <div style="padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
-          <div style="display:flex;justify-content:space-between;gap:8px;">
-            <span class="badge ${color}">${h.accion}</span>
-            <span style="color:var(--text-dim);font-size:11px;">${fecha} · ${etiquetaTabla}</span>
-          </div>
-          <div style="margin-top:4px;"><b>${escapeHtml(h.nombre_registro||'')}</b> — ${escapeHtml(h.detalle||'')}</div>
-        </div>
-      `;
-    }).join('');
+    ultimoHistorial = data || [];
+    renderHistorialList();
   }catch(e){
     box.innerHTML = `<span class="note" style="margin:0;color:var(--red);">Error: ${escapeHtml(e.message)}</span>`;
   }
 }
+
+function renderHistorialList(){
+  const box = document.getElementById('historialList');
+  const filtroBodega = document.getElementById('historialBodegaSelect').value;
+  const filtrado = filtroBodega ? ultimoHistorial.filter(h=>h.bodega===filtroBodega) : ultimoHistorial;
+
+  if(!filtrado.length){ box.innerHTML = '<span class="note" style="margin:0;">No hay historial para mostrar.</span>'; return; }
+
+  box.innerHTML = filtrado.map(h=>{
+    const fecha = new Date(h.creado_en).toLocaleString('es-CO', {dateStyle:'short', timeStyle:'short'});
+    const color = h.accion==='crear' ? 'ok' : h.accion==='eliminar' ? 'low' : 'warn';
+    const etiquetaTabla = h.tabla==='productos' ? 'Inventario' : 'Troncal';
+    return `
+      <div style="padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+          <span class="badge ${color}">${h.accion}</span>
+          <span style="display:flex;align-items:center;gap:6px;">
+            <span style="color:var(--text-dim);font-size:11px;">${fecha} · ${etiquetaTabla}${h.bodega?(' · '+escapeHtml(h.bodega)):''}</span>
+            <button class="del" data-del-hist="${h.id}" title="Eliminar del historial">✕</button>
+          </span>
+        </div>
+        <div style="margin-top:4px;"><b>${escapeHtml(h.nombre_registro||'')}</b> — ${escapeHtml(h.detalle||'')}</div>
+      </div>
+    `;
+  }).join('');
+
+  box.querySelectorAll('[data-del-hist]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.delHist;
+      ultimoHistorial = ultimoHistorial.filter(h=>h.id!==id);
+      renderHistorialList();
+      try{ await sb.from('historial').delete().eq('id', id); }catch(e){}
+    });
+  });
+}
+
 document.getElementById('refreshHistorialBtn').addEventListener('click', cargarHistorial);
+document.getElementById('historialBodegaSelect').addEventListener('change', renderHistorialList);
+
+document.getElementById('clearHistorialBtn').addEventListener('click', async ()=>{
+  const filtroBodega = document.getElementById('historialBodegaSelect').value;
+  const aBorrar = filtroBodega ? ultimoHistorial.filter(h=>h.bodega===filtroBodega) : ultimoHistorial;
+  if(!aBorrar.length){ setStatus('bodegasStatus','No hay nada que borrar con ese filtro.','err'); return; }
+  const etiqueta = filtroBodega ? `de la bodega "${filtroBodega}"` : 'de TODAS las bodegas';
+  if(!confirm(`Esto borra ${aBorrar.length} registro(s) del historial ${etiqueta}. No se puede deshacer. ¿Continuar?`)) return;
+
+  const ids = aBorrar.map(h=>h.id);
+  ultimoHistorial = ultimoHistorial.filter(h=>!ids.includes(h.id));
+  renderHistorialList();
+  try{
+    await sb.from('historial').delete().in('id', ids);
+  }catch(e){
+    console.error(e);
+  }
+});
 
 // ================== Consultar disponibilidad (texto o imagen) ==================
 document.getElementById('dispoImagenBtn').addEventListener('click', ()=>document.getElementById('dispoImagenInput').click());
@@ -1627,8 +1720,14 @@ document.getElementById('dispoTexto').addEventListener('paste', async (e)=>{
 
 function palabrasClave(texto){
   const stop = new Set(['de','la','el','los','las','un','una','y','o','para','con','en','del','al','que','se','necesito','necesitamos','pedido','favor','porfa','porfavor','urgente','envio','envío','material','materiales']);
-  return normalizeName(texto).split(/[^a-z0-9áéíóúñ]+/i).filter(w=>w.length>=3 && !stop.has(w));
+  return normalizeName(texto).split(/[^a-z0-9áéíóúñ]+/i).filter(w=>{
+    if(!w || stop.has(w)) return false;
+    if(/^[0-9]+$/.test(w)) return true; // los números cuentan aunque sean cortos (ej: "24")
+    return w.length>=3;
+  });
 }
+
+let ultimoResultadoDispo = [];
 
 document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
   const texto = document.getElementById('dispoTexto').value.trim();
@@ -1652,17 +1751,27 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
     return;
   }
 
-  const resultadosStock = todosStock.map(it=>{
-    const nombreNorm = normalizeName(it.name);
-    const coincidencias = palabras.filter(p=>nombreNorm.includes(p)).length;
-    return {it, coincidencias};
-  }).filter(r=>r.coincidencias>0).sort((a,b)=>b.coincidencias-a.coincidencias);
+  // Coincidencia estricta: primero exige TODAS las palabras (ej: "24" Y "hilos" a la vez).
+  // Solo si eso no encuentra nada, se relaja a "al menos una palabra" como respaldo.
+  function buscarEnLista(lista){
+    const conTodas = lista.filter(it => {
+      const n = normalizeName(it.name);
+      return palabras.every(p => n.includes(p));
+    });
+    if(conTodas.length) return conTodas.map(it=>({it, coincidencias:palabras.length}));
+    return lista.map(it=>{
+      const n = normalizeName(it.name);
+      const coincidencias = palabras.filter(p=>n.includes(p)).length;
+      return {it, coincidencias};
+    }).filter(r=>r.coincidencias>0).sort((a,b)=>b.coincidencias-a.coincidencias);
+  }
 
-  const resultadosLog = todosLog.map(it=>{
-    const nombreNorm = normalizeName(it.name);
-    const coincidencias = palabras.filter(p=>nombreNorm.includes(p)).length;
-    return {it, coincidencias};
-  }).filter(r=>r.coincidencias>0).sort((a,b)=>b.coincidencias-a.coincidencias);
+  const resultadosStock = buscarEnLista(todosStock);
+  const resultadosLog = buscarEnLista(todosLog);
+  ultimoResultadoDispo = [
+    ...resultadosStock.map(({it})=>({tipo:'Stock', nombre:it.name, bodega:it.grupo, cantidad:it.qty, estado: statusOf(it)==='low'?'AGOTADO':statusOf(it)==='warn'?'POR ACABARSE':'DISPONIBLE'})),
+    ...resultadosLog.map(({it})=>({tipo:'Registro', nombre:it.name, bodega:it.grupo, cantidad:it.metros+'m', estado: it.entregadoA ? ('Entregado a '+it.entregadoA) : 'En bodega'}))
+  ];
 
   const box = document.getElementById('dispoResultados');
   if(!resultadosStock.length && !resultadosLog.length){
@@ -1674,7 +1783,7 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
   let html = '';
   if(resultadosStock.length){
     html += '<p class="note" style="margin:0 0 6px;font-weight:600;">Bodegas tipo Stock:</p>';
-    html += resultadosStock.slice(0,25).map(({it})=>{
+    html += resultadosStock.slice(0,50).map(({it})=>{
       const st = statusOf(it);
       const estado = st==='low' ? 'Agotado — hay que comprar' : st==='warn' ? 'Por acabarse' : 'Disponible';
       const clase = st==='low' ? 'low' : st==='warn' ? 'warn' : 'ok';
@@ -1691,7 +1800,7 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
   }
   if(resultadosLog.length){
     html += '<p class="note" style="margin:14px 0 6px;font-weight:600;">Bodegas tipo Registro (Troncal):</p>';
-    html += resultadosLog.slice(0,25).map(({it})=>`
+    html += resultadosLog.slice(0,50).map(({it})=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px;">
         <div><b>${escapeHtml(it.name)}</b><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(it.grupo)}</span></div>
         <div style="text-align:right;">
@@ -1703,6 +1812,17 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
   }
   box.innerHTML = html;
   setStatus('dispoOcrStatus', `${resultadosStock.length + resultadosLog.length} resultado(s) encontrado(s).`, 'ok');
+});
+
+document.getElementById('dispoDescargarBtn').addEventListener('click', async ()=>{
+  if(!ultimoResultadoDispo.length){ setStatus('dispoOcrStatus','Primero haz una búsqueda.','err'); return; }
+  const filas = ultimoResultadoDispo.map(r=>[r.tipo, r.nombre, r.bodega, String(r.cantidad), r.estado]);
+  await descargarExcelFormateado({
+    titulo: 'RESULTADOS DE DISPONIBILIDAD',
+    columnas: ['TIPO','MATERIAL','BODEGA','CANTIDAD','ESTADO'],
+    filas
+  });
+  setStatus('dispoOcrStatus', 'Excel descargado.', 'ok');
 });
 
 // ================== Navegación por pestañas + panel admin oculto ==================
