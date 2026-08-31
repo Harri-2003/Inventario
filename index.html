@@ -349,6 +349,11 @@
   <main>
 
     <section class="tab-panel" data-panel="inventario">
+      <div class="group-switch" id="stockSwitcher" style="flex-wrap:wrap;"></div>
+      <div id="inventarioSlot"></div>
+    </section>
+
+    <div id="stockViewBlock" style="display:none;">
       <div class="card">
         <h2>Cargar inventario desde Excel</h2>
         <button id="plantillaInvBtn" style="margin-bottom:12px;">📋 Descargar plantilla</button>
@@ -363,14 +368,13 @@
 
       <div class="card">
         <h2 style="justify-content:space-between;cursor:pointer;" id="invCollapseToggle">
-          <span>Inventario</span>
+          <span id="stockViewTitle">Inventario</span>
           <span style="display:flex;align-items:center;gap:8px;">
             <button id="invEditBtn" style="font-size:11px;padding:6px 11px;" onclick="event.stopPropagation()">🔒 Editar</button>
             <span id="invChevron" style="font-size:12px;color:var(--text-mut);transition:transform .15s;">▾</span>
           </span>
         </h2>
         <div id="invCollapseBody" style="display:none;">
-          <div class="group-switch" id="stockSwitcher" style="flex-wrap:wrap;"></div>
           <div class="field" style="margin-bottom:12px;">
             <input type="text" id="invSearch" placeholder="Buscar material… ej: amarra, conector, ont">
           </div>
@@ -397,12 +401,17 @@
           </div>
         </div>
       </div>
-    </section>
+    </div>
 
     <section class="tab-panel" data-panel="troncal" style="display:none">
+      <div class="group-switch" id="logSwitcher" style="flex-wrap:wrap;"></div>
+      <div id="troncalSlot"></div>
+    </section>
+
+    <div id="logViewBlock" style="display:none;">
       <div class="card">
         <h2 style="justify-content:space-between;cursor:pointer;" id="troncalCollapseToggle">
-          <span>Registro de entregas — Troncal</span>
+          <span id="logViewTitle">Registro de entregas — Troncal</span>
           <span style="display:flex;align-items:center;gap:8px;">
             <button id="troncalEditBtn" style="font-size:11px;padding:6px 11px;" onclick="event.stopPropagation()">🔒 Editar</button>
             <span id="troncalChevron" style="font-size:12px;color:var(--text-mut);transition:transform .15s;">▾</span>
@@ -410,7 +419,6 @@
         </h2>
         <div id="troncalCollapseBody" style="display:none;">
           <p class="note">Registro de cable de fibra troncal entregado: cuánto, a quién, cuándo y cuánto se devuelve. No maneja mínimos ni alertas, es solo una bitácora.</p>
-          <div class="group-switch" id="logSwitcher" style="flex-wrap:wrap;"></div>
           <div class="field" style="margin-bottom:12px;">
             <input type="text" id="troncalSearch" placeholder="Buscar material… ej: 12 hilos, 24h, spam 400">
           </div>
@@ -465,7 +473,7 @@
         <button class="primary" id="sendTroncalLogBtn">Enviar registro completo</button>
         <div class="status" id="troncalAlertStatus"></div>
       </div>
-    </section>
+    </div>
 
     <section class="tab-panel" data-panel="alertas" style="display:none">
       <div class="card">
@@ -535,14 +543,17 @@
       <div class="card">
         <h2>Gestionar bodegas</h2>
         <p class="note">
-          Crea, renombra o elimina bodegas. "Stock" = como Inventario (con mínimos y estado). "Registro" = como Troncal (bitácora, sin mínimos).
+          "Aparece en" decide en qué pestaña ves la bodega (Inventario o Troncal). "Comportamiento" decide cómo funciona
+          (con mínimos y estado tipo Inventario, o registro/bitácora tipo Troncal) — son independientes: puedes tener
+          una bodega que aparezca en Troncal pero se comporte con mínimos, o al revés.
           "Ninguna" en alertas = ni automática ni manual, solo se ve en la página. "Oculta" = solo tú la ves, con tu clave.
         </p>
         <table>
           <thead>
             <tr>
               <th>Nombre</th>
-              <th>Tipo</th>
+              <th>Aparece en</th>
+              <th>Comportamiento</th>
               <th>Alertas</th>
               <th>Oculta</th>
               <th>Sin filtro*</th>
@@ -551,7 +562,7 @@
           </thead>
           <tbody id="bodegasTbody"></tbody>
         </table>
-        <p class="note" style="margin:8px 0 0;">*Sin filtro: solo aplica a bodegas tipo Stock. Si está marcado, el Excel se importa completo, sin lista blanca.</p>
+        <p class="note" style="margin:8px 0 0;">*Sin filtro: solo aplica a bodegas con mínimos. Si está marcado, el Excel se importa completo, sin lista blanca.</p>
         <div class="footer-actions">
           <button id="addBodegaBtn">+ Agregar bodega</button>
         </div>
@@ -749,13 +760,13 @@ async function loadAll(){
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
     schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo}));
     troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal'}));
-    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, orden:r.orden}));
+    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, orden:r.orden}));
     if(!bodegas.some(b=>b.nombre===currentStockBodega && b.tipo==='stock')){
-      const primero = bodegas.find(b=>b.tipo==='stock' && !b.oculta);
+      const primero = bodegas.find(b=>b.lado==='inventario' && b.tipo==='stock' && !b.oculta) || bodegas.find(b=>b.tipo==='stock' && !b.oculta);
       if(primero) currentStockBodega = primero.nombre;
     }
     if(!bodegas.some(b=>b.nombre===currentLogBodega && b.tipo==='log')){
-      const primero = bodegas.find(b=>b.tipo==='log' && !b.oculta);
+      const primero = bodegas.find(b=>b.lado==='troncal' && b.tipo==='log' && !b.oculta) || bodegas.find(b=>b.tipo==='log' && !b.oculta);
       if(primero) currentLogBodega = primero.nombre;
     }
     setConnLed('ok');
@@ -763,6 +774,21 @@ async function loadAll(){
     console.error(e);
     setConnLed('error');
   }
+
+  // Coloca cada bloque (con mínimos / registro) en su lugar natural la primera vez
+  const stockBlock = document.getElementById('stockViewBlock');
+  const logBlock = document.getElementById('logViewBlock');
+  const invSlot = document.getElementById('inventarioSlot');
+  const tronSlot = document.getElementById('troncalSlot');
+  if(stockBlock && invSlot && !invSlot.contains(stockBlock) && !tronSlot.contains(stockBlock)){
+    invSlot.appendChild(stockBlock);
+    stockBlock.style.display = '';
+  }
+  if(logBlock && tronSlot && !tronSlot.contains(logBlock) && !invSlot.contains(logBlock)){
+    tronSlot.appendChild(logBlock);
+    logBlock.style.display = '';
+  }
+
   render();
   renderPermitidos();
   renderRecipients();
@@ -1164,10 +1190,16 @@ function renderBodegasAdmin(){
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td data-label="Nombre"><input type="text" value="${escapeHtml(b.nombre)}" data-bfield="nombre" data-bid="${b.id}" style="width:100%;"></td>
-      <td data-label="Para">
+      <td data-label="Aparece en">
+        <select data-bfield="lado" data-bid="${b.id}">
+          <option value="inventario" ${b.lado==='inventario'?'selected':''}>Inventario</option>
+          <option value="troncal" ${b.lado==='troncal'?'selected':''}>Troncal</option>
+        </select>
+      </td>
+      <td data-label="Comportamiento">
         <select data-bfield="tipo" data-bid="${b.id}">
-          <option value="stock" ${b.tipo==='stock'?'selected':''}>Inventario (con mínimos)</option>
-          <option value="log" ${b.tipo==='log'?'selected':''}>Troncal (registro/bitácora)</option>
+          <option value="stock" ${b.tipo==='stock'?'selected':''}>Con mínimos</option>
+          <option value="log" ${b.tipo==='log'?'selected':''}>Registro/bitácora</option>
         </select>
       </td>
       <td data-label="Alertas">
@@ -1195,7 +1227,7 @@ function renderBodegasAdmin(){
       const field = e.target.dataset.bfield;
       b[field] = field==='oculta'||field==='sinFiltro' ? e.target.checked : e.target.value;
       if(field==='tipo'){
-        // "sin filtro" solo aplica a tipo Inventario; refresca para des/habilitar el checkbox
+        // "sin filtro" solo aplica a bodegas con mínimos; refresca para des/habilitar el checkbox
         renderBodegasAdmin();
       }
     });
@@ -1220,6 +1252,8 @@ function renderBodegasAdmin(){
       renderLogSwitcher();
       renderHistorialBodegaSelect();
       renderNewChatGroupsBox();
+      // Si la bodega que se estaba viendo cambió de comportamiento o de lado, refresca la vista actual
+      seleccionarBodega(b);
     });
   });
 
@@ -1240,7 +1274,7 @@ function renderBodegasAdmin(){
 
 async function saveBodega(b){
   try{
-    const payload = { nombre:b.nombre, tipo:b.tipo, modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro };
+    const payload = { nombre:b.nombre, tipo:b.tipo, lado: b.lado || (b.tipo==='stock'?'inventario':'troncal'), modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro };
     let query;
     if(b.id && b.id.length===36){
       payload.id = b.id;
@@ -1261,7 +1295,7 @@ document.getElementById('addBodegaBtn').addEventListener('click', async ()=>{
   let nombreBase = 'Nueva bodega', n = 1;
   while(bodegas.some(x=>normalizeName(x.nombre)===normalizeName(n===1?nombreBase:`${nombreBase} ${n}`))) n++;
   const nombre = n===1 ? nombreBase : `${nombreBase} ${n}`;
-  const b = {id:uid(), nombre, tipo:'stock', modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1};
+  const b = {id:uid(), nombre, tipo:'stock', lado:'inventario', modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1};
   bodegas.push(b);
   renderBodegasAdmin();
   await saveBodega(b);
@@ -1270,7 +1304,7 @@ document.getElementById('addBodegaBtn').addEventListener('click', async ()=>{
   renderLogSwitcher();
   renderHistorialBodegaSelect();
   renderNewChatGroupsBox();
-  setStatus('bodegasStatus', `Bodega "${nombre}" creada. Cámbiale el nombre y dale "💾 Guardar".`, 'ok');
+  setStatus('bodegasStatus', `Bodega "${nombre}" creada en Inventario, con mínimos. Cámbiale el "Aparece en" o "Comportamiento" si quieres otra combinación, y dale "💾 Guardar".`, 'ok');
 });
 
 function renderPermitidosBodegaSelect(){
@@ -1300,7 +1334,7 @@ document.getElementById('recipientsLockBtn').addEventListener('click', ()=>{
 });
 
 // ================== Bodegas: selectores ==================
-async function crearBodegaRapida(){
+async function crearBodegaRapida(lado){
   if(!requireAdmin()) return;
   const nombre = window.prompt('Nombre de la nueva bodega:');
   if(!nombre || !nombre.trim()) return;
@@ -1310,60 +1344,82 @@ async function crearBodegaRapida(){
   }
   const esStock = confirm(
     '¿Cómo va a funcionar esta bodega?\n\n' +
-    'Aceptar = INVENTARIO (con mínimos y estado Agotado/Por acabarse/Ok)\n' +
-    'Cancelar = TRONCAL (registro/bitácora, sin mínimos)'
+    'Aceptar = con MÍNIMOS (como Inventario: Agotado/Por acabarse/Ok)\n' +
+    'Cancelar = REGISTRO (como Troncal: bitácora, sin mínimos)'
   );
-  const b = {id:uid(), nombre:nombre.trim(), tipo: esStock?'stock':'log', modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1};
+  const b = {
+    id:uid(), nombre:nombre.trim(), tipo: esStock?'stock':'log',
+    lado, // dónde aparece (Inventario o Troncal) — independiente de cómo se comporta
+    modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1
+  };
   bodegas.push(b);
   await saveBodega(b);
   renderBodegasAdmin();
   renderHistorialBodegaSelect();
   renderNewChatGroupsBox();
-  if(esStock){
+  seleccionarBodega(b);
+}
+
+// Selecciona una bodega (venga del switcher que venga) y muestra el bloque
+// correcto (con mínimos, o registro) según cómo se comporta esa bodega,
+// dentro de la pestaña donde la seleccionaste.
+function seleccionarBodega(b){
+  const enInventario = b.lado === 'inventario';
+  const slot = document.getElementById(enInventario ? 'inventarioSlot' : 'troncalSlot');
+  const stockBlock = document.getElementById('stockViewBlock');
+  const logBlock = document.getElementById('logViewBlock');
+
+  if(b.tipo === 'stock'){
     currentStockBodega = b.nombre;
-    renderStockSwitcher();
+    document.getElementById('stockViewTitle').textContent = enInventario ? 'Inventario' : `Inventario — ${b.nombre}`;
+    slot.innerHTML = '';
+    slot.appendChild(stockBlock);
+    stockBlock.style.display = '';
     render();
   } else {
     currentLogBodega = b.nombre;
-    renderLogSwitcher();
+    document.getElementById('logViewTitle').textContent = enInventario ? `Registro — ${b.nombre}` : 'Registro de entregas — Troncal';
+    slot.innerHTML = '';
+    slot.appendChild(logBlock);
+    logBlock.style.display = '';
     renderTroncal();
   }
+  renderStockSwitcher();
+  renderLogSwitcher();
 }
 
 function renderStockSwitcher(){
   const box = document.getElementById('stockSwitcher');
   if(!box) return;
-  const visibles = bodegas.filter(b => b.tipo==='stock' && (!b.oculta || isAdmin()));
+  const visibles = bodegas.filter(b => b.lado==='inventario' && (!b.oculta || isAdmin()));
   box.innerHTML = visibles.map(b=>`
-    <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===currentStockBodega?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}</button>
-  `).join('') + `<button data-nueva-bodega-stock title="Crear otra bodega (elige tipo)">+ Nueva bodega</button>`;
+    <button data-bod="${escapeHtml(b.nombre)}" class="${(b.tipo==='stock'&&b.nombre===currentStockBodega)||(b.tipo==='log'&&b.nombre===currentLogBodega)?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}${b.tipo==='log'?' 📋':''}</button>
+  `).join('') + (isAdmin() ? `<button data-nueva-bodega-lado="inventario" title="Crear otra bodega en Inventario (elige cómo se comporta)">+ Nueva bodega</button>` : '');
   box.querySelectorAll('[data-bod]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      currentStockBodega = btn.dataset.bod;
-      renderStockSwitcher();
-      render();
+      const b = bodegas.find(x=>x.nombre===btn.dataset.bod);
+      if(b) seleccionarBodega(b);
     });
   });
-  const nuevaBtn = box.querySelector('[data-nueva-bodega-stock]');
-  if(nuevaBtn) nuevaBtn.addEventListener('click', crearBodegaRapida);
+  const nuevaBtn = box.querySelector('[data-nueva-bodega-lado]');
+  if(nuevaBtn) nuevaBtn.addEventListener('click', ()=>crearBodegaRapida('inventario'));
 }
 
 function renderLogSwitcher(){
   const box = document.getElementById('logSwitcher');
   if(!box) return;
-  const visibles = bodegas.filter(b => b.tipo==='log' && (!b.oculta || isAdmin()));
+  const visibles = bodegas.filter(b => b.lado==='troncal' && (!b.oculta || isAdmin()));
   box.innerHTML = visibles.map(b=>`
-    <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===currentLogBodega?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}</button>
-  `).join('') + `<button data-nueva-bodega-log title="Crear otra bodega (elige tipo)">+ Nueva bodega</button>`;
+    <button data-bod="${escapeHtml(b.nombre)}" class="${(b.tipo==='log'&&b.nombre===currentLogBodega)||(b.tipo==='stock'&&b.nombre===currentStockBodega)?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}${b.tipo==='stock'?' 📦':''}</button>
+  `).join('') + (isAdmin() ? `<button data-nueva-bodega-lado="troncal" title="Crear otra bodega en Troncal (elige cómo se comporta)">+ Nueva bodega</button>` : '');
   box.querySelectorAll('[data-bod]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      currentLogBodega = btn.dataset.bod;
-      renderLogSwitcher();
-      renderTroncal();
+      const b = bodegas.find(x=>x.nombre===btn.dataset.bod);
+      if(b) seleccionarBodega(b);
     });
   });
-  const nuevaBtn = box.querySelector('[data-nueva-bodega-log]');
-  if(nuevaBtn) nuevaBtn.addEventListener('click', crearBodegaRapida);
+  const nuevaBtn = box.querySelector('[data-nueva-bodega-lado]');
+  if(nuevaBtn) nuevaBtn.addEventListener('click', ()=>crearBodegaRapida('troncal'));
 }
 
 function renderRecipients(){
@@ -1767,13 +1823,33 @@ function palabrasClave(texto){
 
 let ultimoResultadoDispo = [];
 
-document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
-  const texto = document.getElementById('dispoTexto').value.trim();
-  if(!texto){ setStatus('dispoOcrStatus','Pega o escribe el pedido primero.','err'); return; }
-  const palabras = palabrasClave(texto);
-  if(!palabras.length){ setStatus('dispoOcrStatus','No encontré palabras suficientes para buscar.','err'); return; }
+function coincideConProducto(palabraBusqueda, palabrasProducto){
+  // "amarras" (búsqueda, plural) sí debe calzar con "amarra" (producto, singular) y viceversa
+  return palabrasProducto.some(pw => pw.includes(palabraBusqueda) || palabraBusqueda.includes(pw));
+}
 
-  // Trae TODOS los productos (bodegas tipo Stock) y TODAS las entregas (bodegas tipo Registro)
+function buscarLineaEnLista(palabras, lista){
+  const scored = lista.map(it=>{
+    const palabrasProducto = normalizeName(it.name).split(/\s+/).filter(Boolean);
+    const coincidencias = palabras.filter(p=>coincideConProducto(p, palabrasProducto)).length;
+    return {it, coincidencias};
+  });
+  const conTodas = scored.filter(r=>r.coincidencias===palabras.length);
+  if(conTodas.length) return conTodas.sort((a,b)=>a.it.name.localeCompare(b.it.name));
+  if(palabras.length===1) return [];
+  const minRequerido = Math.max(2, Math.ceil(palabras.length*0.6));
+  return scored.filter(r=>r.coincidencias>=minRequerido).sort((a,b)=>b.coincidencias-a.coincidencias);
+}
+
+document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
+  const textoCompleto = document.getElementById('dispoTexto').value.trim();
+  if(!textoCompleto){ setStatus('dispoOcrStatus','Pega o escribe el pedido primero.','err'); return; }
+
+  // Cada línea del cuadro de texto se busca por separado (un pedido puede
+  // traer varios productos, uno por línea, y cada uno se filtra a fondo).
+  const lineas = textoCompleto.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!lineas.length){ setStatus('dispoOcrStatus','No encontré palabras suficientes para buscar.','err'); return; }
+
   let todosStock = [], todosLog = [];
   try{
     const [prod, tron] = await Promise.all([
@@ -1789,81 +1865,70 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
     return;
   }
 
-  // Coincidencia estricta: primero exige TODAS las palabras a la vez (ej: "amarra" Y "10" Y "cm" Y "blanca").
-  // Solo si eso no encuentra nada, se relaja a "más de la mitad de las palabras" (nunca a solo 1, para evitar
-  // que una sola palabra genérica como "blanca" traiga productos que no tienen nada que ver).
-  function coincideConProducto(palabraBusqueda, palabrasProducto){
-    // "amarras" (búsqueda, plural) sí debe calzar con "amarra" (producto, singular) y viceversa
-    return palabrasProducto.some(pw => pw.includes(palabraBusqueda) || palabraBusqueda.includes(pw));
-  }
-
-  function buscarEnLista(lista){
-    const scored = lista.map(it=>{
-      const palabrasProducto = normalizeName(it.name).split(/\s+/).filter(Boolean);
-      const coincidencias = palabras.filter(p=>coincideConProducto(p, palabrasProducto)).length;
-      return {it, coincidencias};
-    });
-    const conTodas = scored.filter(r=>r.coincidencias===palabras.length);
-    if(conTodas.length) return conTodas.sort((a,b)=>a.it.name.localeCompare(b.it.name));
-    if(palabras.length===1) return []; // una sola palabra y no calzó exacto -> mejor no mostrar nada suelto
-    const minRequerido = Math.max(2, Math.ceil(palabras.length*0.6));
-    return scored.filter(r=>r.coincidencias>=minRequerido).sort((a,b)=>b.coincidencias-a.coincidencias);
-  }
-
-  const resultadosStock = buscarEnLista(todosStock);
-  const resultadosLog = buscarEnLista(todosLog);
-  ultimoResultadoDispo = [
-    ...resultadosStock.map(({it})=>({tipo:'Stock', nombre:it.name, bodega:it.grupo, cantidad:it.qty, estado: statusOf(it)==='low'?'AGOTADO':statusOf(it)==='warn'?'POR ACABARSE':'DISPONIBLE'})),
-    ...resultadosLog.map(({it})=>({tipo:'Registro', nombre:it.name, bodega:it.grupo, cantidad:it.metros+'m', estado: it.entregadoA ? ('Entregado a '+it.entregadoA) : 'En bodega'}))
-  ];
-
+  ultimoResultadoDispo = [];
   const box = document.getElementById('dispoResultados');
-  if(!resultadosStock.length && !resultadosLog.length){
-    box.innerHTML = '<p class="note" style="margin:0;">No encontré ningún producto parecido a ese pedido en ninguna bodega.</p>';
-    setStatus('dispoOcrStatus', '', '');
-    return;
-  }
-
   let html = '';
-  if(resultadosStock.length){
-    html += '<p class="note" style="margin:0 0 6px;font-weight:600;">Bodegas tipo Stock:</p>';
-    html += resultadosStock.slice(0,50).map(({it})=>{
-      const st = statusOf(it);
-      const estado = st==='low' ? 'Agotado — hay que comprar' : st==='warn' ? 'Por acabarse' : 'Disponible';
-      const clase = st==='low' ? 'low' : st==='warn' ? 'warn' : 'ok';
-      return `
+  let totalEncontrados = 0;
+
+  lineas.forEach(linea=>{
+    const palabras = palabrasClave(linea);
+    if(!palabras.length) return;
+
+    const resultadosStock = buscarLineaEnLista(palabras, todosStock);
+    const resultadosLog = buscarLineaEnLista(palabras, todosLog);
+    totalEncontrados += resultadosStock.length + resultadosLog.length;
+
+    ultimoResultadoDispo.push(
+      ...resultadosStock.map(({it})=>({consulta:linea, tipo:'Stock', nombre:it.name, bodega:it.grupo, cantidad:it.qty, estado: statusOf(it)==='low'?'AGOTADO':statusOf(it)==='warn'?'POR ACABARSE':'DISPONIBLE'})),
+      ...resultadosLog.map(({it})=>({consulta:linea, tipo:'Registro', nombre:it.name, bodega:it.grupo, cantidad:it.metros+'m', estado: it.entregadoA ? ('Entregado a '+it.entregadoA) : 'En bodega'}))
+    );
+
+    html += `<p class="note" style="margin:14px 0 6px;font-weight:700;color:var(--text);">🔎 "${escapeHtml(linea)}"</p>`;
+
+    if(!resultadosStock.length && !resultadosLog.length){
+      html += '<p class="note" style="margin:0 0 8px;">No encontré nada parecido a esto en ninguna bodega.</p>';
+      return;
+    }
+
+    if(resultadosStock.length){
+      html += resultadosStock.slice(0,50).map(({it})=>{
+        const st = statusOf(it);
+        const estado = st==='low' ? 'Agotado — hay que comprar' : st==='warn' ? 'Por acabarse' : 'Disponible';
+        const clase = st==='low' ? 'low' : st==='warn' ? 'warn' : 'ok';
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px;">
+            <div><b>${escapeHtml(it.name)}</b><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(it.grupo)}</span></div>
+            <div style="text-align:right;">
+              <div class="badge ${clase}">${estado}</div>
+              <div style="color:var(--text-mut);font-size:11.5px;margin-top:3px;">${it.qty} disponibles</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    if(resultadosLog.length){
+      html += resultadosLog.slice(0,50).map(({it})=>`
         <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px;">
           <div><b>${escapeHtml(it.name)}</b><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(it.grupo)}</span></div>
           <div style="text-align:right;">
-            <div class="badge ${clase}">${estado}</div>
-            <div style="color:var(--text-mut);font-size:11.5px;margin-top:3px;">${it.qty} disponibles</div>
+            <div class="badge ${it.entregadoA?'warn':'ok'}">${it.entregadoA?('Entregado a '+escapeHtml(it.entregadoA)):'En bodega'}</div>
+            <div style="color:var(--text-mut);font-size:11.5px;margin-top:3px;">${it.metros} metros</div>
           </div>
         </div>
-      `;
-    }).join('');
-  }
-  if(resultadosLog.length){
-    html += '<p class="note" style="margin:14px 0 6px;font-weight:600;">Bodegas tipo Registro (Troncal):</p>';
-    html += resultadosLog.slice(0,50).map(({it})=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13px;">
-        <div><b>${escapeHtml(it.name)}</b><br><span style="color:var(--text-dim);font-size:11px;">${escapeHtml(it.grupo)}</span></div>
-        <div style="text-align:right;">
-          <div class="badge ${it.entregadoA?'warn':'ok'}">${it.entregadoA?('Entregado a '+escapeHtml(it.entregadoA)):'En bodega'}</div>
-          <div style="color:var(--text-mut);font-size:11.5px;margin-top:3px;">${it.metros} metros</div>
-        </div>
-      </div>
-    `).join('');
-  }
-  box.innerHTML = html;
-  setStatus('dispoOcrStatus', `${resultadosStock.length + resultadosLog.length} resultado(s) encontrado(s).`, 'ok');
+      `).join('');
+    }
+  });
+
+  box.innerHTML = html || '<p class="note" style="margin:0;">No encontré ningún producto parecido a ese pedido en ninguna bodega.</p>';
+  setStatus('dispoOcrStatus', `${lineas.length} línea(s) buscada(s), ${totalEncontrados} resultado(s) en total.`, 'ok');
 });
 
 document.getElementById('dispoDescargarBtn').addEventListener('click', async ()=>{
   if(!ultimoResultadoDispo.length){ setStatus('dispoOcrStatus','Primero haz una búsqueda.','err'); return; }
-  const filas = ultimoResultadoDispo.map(r=>[r.tipo, r.nombre, r.bodega, String(r.cantidad), r.estado]);
+  const filas = ultimoResultadoDispo.map(r=>[r.consulta, r.tipo, r.nombre, r.bodega, String(r.cantidad), r.estado]);
   await descargarExcelFormateado({
     titulo: 'RESULTADOS DE DISPONIBILIDAD',
-    columnas: ['TIPO','MATERIAL','BODEGA','CANTIDAD','ESTADO'],
+    columnas: ['BUSCADO','TIPO','MATERIAL','BODEGA','CANTIDAD','ESTADO'],
     filas
   });
   setStatus('dispoOcrStatus', 'Excel descargado.', 'ok');
