@@ -305,6 +305,7 @@
 </head>
 <body>
 <div class="app">
+<div id="viewBlocksStorage" style="display:none;"></div>
 
   <header class="topbar">
     <div class="brand">
@@ -788,6 +789,8 @@ async function loadAll(){
     tronSlot.appendChild(logBlock);
     logBlock.style.display = '';
   }
+  bodegaEnInventarioSlot = currentStockBodega;
+  bodegaEnTroncalSlot = currentLogBodega;
 
   render();
   renderPermitidos();
@@ -1363,29 +1366,57 @@ async function crearBodegaRapida(lado){
 // Selecciona una bodega (venga del switcher que venga) y muestra el bloque
 // correcto (con mínimos, o registro) según cómo se comporta esa bodega,
 // dentro de la pestaña donde la seleccionaste.
+// Recuerda qué bodega está mostrándose físicamente en cada pestaña ahora mismo,
+// para poder devolverla a su lugar si el mismo bloque se usó del otro lado.
+let bodegaEnInventarioSlot = null;
+let bodegaEnTroncalSlot = null;
+
+function moverBloqueA(destinoSlotId, blockId){
+  // appendChild sobre un nodo que ya existe en el DOM simplemente lo MUEVE
+  // (nunca lo destruye), a diferencia de innerHTML='' que sí lo borra.
+  const destino = document.getElementById(destinoSlotId);
+  const bloque = document.getElementById(blockId);
+  if(destino && bloque){
+    destino.appendChild(bloque);
+    bloque.style.display = '';
+  }
+}
+
 function seleccionarBodega(b){
   const enInventario = b.lado === 'inventario';
-  const slot = document.getElementById(enInventario ? 'inventarioSlot' : 'troncalSlot');
-  const stockBlock = document.getElementById('stockViewBlock');
-  const logBlock = document.getElementById('logViewBlock');
+  const slotId = enInventario ? 'inventarioSlot' : 'troncalSlot';
 
   if(b.tipo === 'stock'){
     currentStockBodega = b.nombre;
     document.getElementById('stockViewTitle').textContent = enInventario ? 'Inventario' : `Inventario — ${b.nombre}`;
-    slot.innerHTML = '';
-    slot.appendChild(stockBlock);
-    stockBlock.style.display = '';
+    moverBloqueA(slotId, 'stockViewBlock');
     render();
   } else {
     currentLogBodega = b.nombre;
     document.getElementById('logViewTitle').textContent = enInventario ? `Registro — ${b.nombre}` : 'Registro de entregas — Troncal';
-    slot.innerHTML = '';
-    slot.appendChild(logBlock);
-    logBlock.style.display = '';
+    moverBloqueA(slotId, 'logViewBlock');
     renderTroncal();
   }
+
+  if(enInventario) bodegaEnInventarioSlot = b.nombre; else bodegaEnTroncalSlot = b.nombre;
   renderStockSwitcher();
   renderLogSwitcher();
+}
+
+// Si el bloque que le tocaba a esta pestaña se fue para la otra (porque ahí
+// se seleccionó una bodega "cruzada" del mismo tipo), lo trae de vuelta al
+// entrar a la pestaña. Así nunca se queda una pestaña vacía o pegada.
+function resincronizarPestana(lado){
+  const nombreBodega = lado==='inventario' ? bodegaEnInventarioSlot : bodegaEnTroncalSlot;
+  const b = bodegas.find(x=>x.nombre===nombreBodega) || bodegas.find(x=>x.lado===lado && !x.oculta);
+  if(!b) return;
+  const slotId = lado==='inventario' ? 'inventarioSlot' : 'troncalSlot';
+  const blockId = b.tipo==='stock' ? 'stockViewBlock' : 'logViewBlock';
+  const slot = document.getElementById(slotId);
+  const block = document.getElementById(blockId);
+  if(slot && block && block.parentElement !== slot){
+    seleccionarBodega(b); // ya no está en su sitio -> lo trae de vuelta y refresca
+  }
 }
 
 function renderStockSwitcher(){
@@ -1952,6 +1983,8 @@ function switchTab(name){
   document.querySelectorAll('.tab-panel').forEach(p=>{
     p.style.display = (p.dataset.panel===name) ? '' : 'none';
   });
+  if(name==='inventario') resincronizarPestana('inventario');
+  if(name==='troncal') resincronizarPestana('troncal');
   window.scrollTo({top:0, behavior:'instant'});
 }
 document.querySelectorAll('.tab-btn').forEach(btn=>{
