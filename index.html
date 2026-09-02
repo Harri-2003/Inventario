@@ -1376,10 +1376,17 @@ function moverBloqueA(destinoSlotId, blockId){
   // (nunca lo destruye), a diferencia de innerHTML='' que sí lo borra.
   const destino = document.getElementById(destinoSlotId);
   const bloque = document.getElementById(blockId);
-  if(destino && bloque){
-    destino.appendChild(bloque);
-    bloque.style.display = '';
-  }
+  const storage = document.getElementById('viewBlocksStorage');
+  if(!destino || !bloque) return;
+
+  // Si en ese slot ya había otro bloque (el que le tocaba antes de esta pestaña),
+  // lo saca primero y lo guarda a un lado — nunca lo destruye, solo lo aparca.
+  Array.from(destino.children).forEach(child=>{
+    if(child !== bloque && storage) storage.appendChild(child);
+  });
+
+  destino.appendChild(bloque);
+  bloque.style.display = '';
 }
 
 function seleccionarBodega(b){
