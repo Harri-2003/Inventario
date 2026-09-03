@@ -7,8 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 
@@ -671,7 +669,6 @@
   </main>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
 <script>
 // ================== Configuración ==================
 // Pega aquí los datos de tu proyecto (Supabase > Project Settings > API).
@@ -696,6 +693,27 @@ let currentLogBodega = 'Troncal';
 let permitidosBodega = 'General';
 
 function uid(){ return 'i'+Math.random().toString(36).slice(2,10); }
+
+// ================== Carga diferida de librerías pesadas ==================
+// XLSX (leer Excel), ExcelJS (plantillas/exportar con formato) y Tesseract
+// (leer texto de imágenes) son librerías grandes. En vez de cargarlas siempre
+// al abrir la página (lo que la hacía sentir lenta), se cargan solo la
+// primera vez que de verdad se necesitan.
+const _scriptsCargados = {};
+function cargarScript(src){
+  if(_scriptsCargados[src]) return _scriptsCargados[src];
+  _scriptsCargados[src] = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('No se pudo cargar ' + src));
+    document.head.appendChild(s);
+  });
+  return _scriptsCargados[src];
+}
+async function asegurarXLSX(){ if(typeof XLSX==='undefined') await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'); }
+async function asegurarExcelJS(){ if(typeof ExcelJS==='undefined') await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'); }
+async function asegurarTesseract(){ if(typeof Tesseract==='undefined') await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js'); }
 
 function isAdmin(){
   return sessionStorage.getItem('admin-unlocked') === '1';
@@ -906,8 +924,21 @@ async function saveItem(it){
   }
 }
 
+function bodegaParaResumen(){
+  // Si lo que se ve ahora mismo en cualquiera de las dos pestañas maneja
+  // mínimos, se usa esa. Si ninguna de las dos tiene mínimos (ej: estás
+  // viendo un registro tipo Troncal), se cae de vuelta a "General" (o la
+  // primera bodega con mínimos que exista) en vez de mostrar todo en 0.
+  const bInv = bodegas.find(b=>b.nombre===bodegaEnInventarioSlot);
+  if(bInv && bInv.tipo==='stock') return bInv.nombre;
+  const bTro = bodegas.find(b=>b.nombre===bodegaEnTroncalSlot);
+  if(bTro && bTro.tipo==='stock') return bTro.nombre;
+  const principal = bodegas.find(b=>b.nombre==='General' && b.tipo==='stock') || bodegas.find(b=>b.tipo==='stock' && !b.oculta);
+  return principal ? principal.nombre : currentStockBodega;
+}
+
 function renderSummary(){
-  const enBodega = items.filter(it=>it.grupo === currentStockBodega);
+  const enBodega = items.filter(it=>it.grupo === bodegaParaResumen());
   const low = enBodega.filter(it=>statusOf(it)==='low').length;
   const warn = enBodega.filter(it=>statusOf(it)==='warn').length;
   const ok = enBodega.length - low - warn;
@@ -1019,6 +1050,7 @@ function handleFile(file){
   const reader = new FileReader();
   reader.onload = async (e)=>{
     try{
+      await asegurarXLSX();
       const data = new Uint8Array(e.target.result);
       const wb = XLSX.read(data, {type:'array'});
       const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -1408,6 +1440,7 @@ function seleccionarBodega(b){
   if(enInventario) bodegaEnInventarioSlot = b.nombre; else bodegaEnTroncalSlot = b.nombre;
   renderStockSwitcher();
   renderLogSwitcher();
+  renderSummary();
 }
 
 // Si el bloque que le tocaba a esta pestaña se fue para la otra (porque ahí
@@ -1431,7 +1464,7 @@ function renderStockSwitcher(){
   if(!box) return;
   const visibles = bodegas.filter(b => b.lado==='inventario' && (!b.oculta || isAdmin()));
   box.innerHTML = visibles.map(b=>`
-    <button data-bod="${escapeHtml(b.nombre)}" class="${(b.tipo==='stock'&&b.nombre===currentStockBodega)||(b.tipo==='log'&&b.nombre===currentLogBodega)?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}${b.tipo==='log'?' 📋':''}</button>
+    <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===bodegaEnInventarioSlot?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}${b.tipo==='log'?' 📋':''}</button>
   `).join('') + (isAdmin() ? `<button data-nueva-bodega-lado="inventario" title="Crear otra bodega en Inventario (elige cómo se comporta)">+ Nueva bodega</button>` : '');
   box.querySelectorAll('[data-bod]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -1448,7 +1481,7 @@ function renderLogSwitcher(){
   if(!box) return;
   const visibles = bodegas.filter(b => b.lado==='troncal' && (!b.oculta || isAdmin()));
   box.innerHTML = visibles.map(b=>`
-    <button data-bod="${escapeHtml(b.nombre)}" class="${(b.tipo==='log'&&b.nombre===currentLogBodega)||(b.tipo==='stock'&&b.nombre===currentStockBodega)?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}${b.tipo==='stock'?' 📦':''}</button>
+    <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===bodegaEnTroncalSlot?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}${b.tipo==='stock'?' 📦':''}</button>
   `).join('') + (isAdmin() ? `<button data-nueva-bodega-lado="troncal" title="Crear otra bodega en Troncal (elige cómo se comporta)">+ Nueva bodega</button>` : '');
   box.querySelectorAll('[data-bod]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -1815,8 +1848,10 @@ document.getElementById('dispoImagenBtn').addEventListener('click', ()=>document
 document.getElementById('dispoImagenInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
-  setStatus('dispoOcrStatus', 'Leyendo texto de la imagen (puede tardar unos segundos)…', '');
+  setStatus('dispoOcrStatus', 'Preparando lector de imágenes (solo la primera vez)…', '');
   try{
+    await asegurarTesseract();
+    setStatus('dispoOcrStatus', 'Leyendo texto de la imagen (puede tardar unos segundos)…', '');
     const { data: { text } } = await Tesseract.recognize(file, 'spa');
     const actual = document.getElementById('dispoTexto').value.trim();
     document.getElementById('dispoTexto').value = actual ? actual + '\n' + text : text;
@@ -1834,8 +1869,10 @@ document.getElementById('dispoTexto').addEventListener('paste', async (e)=>{
   if(!img) return; // pegado de texto normal, no hacer nada especial
   e.preventDefault();
   const file = img.getAsFile();
-  setStatus('dispoOcrStatus', 'Leyendo texto de la imagen pegada…', '');
+  setStatus('dispoOcrStatus', 'Preparando lector de imágenes (solo la primera vez)…', '');
   try{
+    await asegurarTesseract();
+    setStatus('dispoOcrStatus', 'Leyendo texto de la imagen pegada…', '');
     const { data: { text } } = await Tesseract.recognize(file, 'spa');
     const actual = document.getElementById('dispoTexto').value.trim();
     document.getElementById('dispoTexto').value = actual ? actual + '\n' + text : text;
@@ -2041,6 +2078,7 @@ applyTheme(localStorage.getItem('theme') || 'dark');
 
 // ================== Plantillas de Excel (tabla con formato real) ==================
 async function descargarPlantilla(columnas, nombreArchivo){
+  await asegurarExcelJS();
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Plantilla');
 
@@ -2101,6 +2139,7 @@ function handleTroncalFile(file){
   const reader = new FileReader();
   reader.onload = async (e)=>{
     try{
+      await asegurarXLSX();
       const data = new Uint8Array(e.target.result);
       const wb = XLSX.read(data, {type:'array'});
       const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -2141,6 +2180,7 @@ function handleTroncalFile(file){
 
 // ================== Exportar a Excel (con formato bonito) ==================
 async function descargarExcelFormateado({titulo, columnas, filas, coloresEstado}){
+  await asegurarExcelJS();
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Datos');
   const nCol = columnas.length;
