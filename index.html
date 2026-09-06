@@ -524,6 +524,12 @@
       <div class="card">
         <h2>Reporte manual</h2>
         <p class="note">Envía por Telegram, cuando quieras, sin esperar a que algo cruce el mínimo.</p>
+        <div class="field" style="max-width:280px;margin-bottom:12px;">
+          <label>Bodega a enviar</label>
+          <select id="reporteManualBodegaSelect">
+            <option value="">Todas las bodegas</option>
+          </select>
+        </div>
         <div class="row">
           <button class="primary" id="sendLowBtn">🔴 Solo agotados y por acabarse</button>
           <button id="sendAllBtn">Stock completo</button>
@@ -818,6 +824,7 @@ async function loadAll(){
   renderBodegasAdmin();
   renderStockSwitcher();
   renderLogSwitcher();
+  renderReporteManualBodegaSelect();
 }
 
 let realtimeDebounce = null;
@@ -912,7 +919,7 @@ async function saveItem(it){
       payload.id = it.id;
       query = sb.from('productos').upsert(payload); // ya existe -> actualiza por id (llave primaria)
     } else {
-      query = sb.from('productos').upsert(payload, {onConflict:'nombre'}); // nuevo -> fusiona si ya existe ese nombre
+      query = sb.from('productos').upsert(payload, {onConflict:'nombre,grupo'}); // nuevo -> fusiona solo si ya existe ese nombre EN ESA MISMA bodega
     }
     const {data, error} = await query.select().single();
     if(error) throw error;
@@ -1182,7 +1189,7 @@ async function savePermitido(p){
       payload.id = p.id;
       query = sb.from('productos_permitidos').upsert(payload);
     } else {
-      query = sb.from('productos_permitidos').upsert(payload, {onConflict:'nombre_exacto'});
+      query = sb.from('productos_permitidos').upsert(payload, {onConflict:'nombre_exacto,grupo'});
     }
     const {data, error} = await query.select().single();
     if(error) throw error;
@@ -1286,6 +1293,7 @@ function renderBodegasAdmin(){
       renderStockSwitcher();
       renderLogSwitcher();
       renderHistorialBodegaSelect();
+      renderReporteManualBodegaSelect();
       renderNewChatGroupsBox();
       // Si la bodega que se estaba viendo cambió de comportamiento o de lado, refresca la vista actual
       seleccionarBodega(b);
@@ -1338,6 +1346,7 @@ document.getElementById('addBodegaBtn').addEventListener('click', async ()=>{
   renderStockSwitcher();
   renderLogSwitcher();
   renderHistorialBodegaSelect();
+      renderReporteManualBodegaSelect();
   renderNewChatGroupsBox();
   setStatus('bodegasStatus', `Bodega "${nombre}" creada en Inventario, con mínimos. Cámbiale el "Aparece en" o "Comportamiento" si quieres otra combinación, y dale "💾 Guardar".`, 'ok');
 });
@@ -1391,6 +1400,7 @@ async function crearBodegaRapida(lado){
   await saveBodega(b);
   renderBodegasAdmin();
   renderHistorialBodegaSelect();
+      renderReporteManualBodegaSelect();
   renderNewChatGroupsBox();
   seleccionarBodega(b);
 }
@@ -1557,10 +1567,21 @@ document.getElementById('addRecipientBtn').addEventListener('click', async ()=>{
 });
 
 // ================== Reporte manual ==================
+function renderReporteManualBodegaSelect(){
+  const sel = document.getElementById('reporteManualBodegaSelect');
+  if(!sel) return;
+  const actual = sel.value;
+  const visibles = bodegas.filter(b => b.tipo==='stock' && (!b.oculta || isAdmin()));
+  sel.innerHTML = '<option value="">Todas las bodegas</option>' +
+    visibles.map(b=>`<option value="${escapeHtml(b.nombre)}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}</option>`).join('');
+  sel.value = actual || '';
+}
+
 async function enviarReporte(fn){
+  const bodegaElegida = document.getElementById('reporteManualBodegaSelect').value || null;
   setStatus('alertStatus', 'Enviando...', '');
   try{
-    const {error} = await sb.rpc(fn, {grupo_filtro: null});
+    const {error} = await sb.rpc(fn, {grupo_filtro: bodegaElegida});
     if(error) throw error;
     setStatus('alertStatus', 'Reporte enviado a Telegram.', 'ok');
   }catch(e){
@@ -1775,6 +1796,7 @@ function renderHistorialBodegaSelect(){
 
 async function cargarHistorial(){
   renderHistorialBodegaSelect();
+      renderReporteManualBodegaSelect();
   const box = document.getElementById('historialList');
   box.innerHTML = '<span class="note" style="margin:0;">Cargando…</span>';
   try{
