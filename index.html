@@ -331,7 +331,11 @@
   <div class="summary" id="summary"></div>
 
   <nav class="tabs" id="tabsNav">
-    <button class="tab-btn active" data-tab="inventario">
+    <button class="tab-btn active" data-tab="buscar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+      <span class="tab-label">Buscar</span>
+    </button>
+    <button class="tab-btn" data-tab="inventario">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
       <span class="tab-label">Inventario</span>
     </button>
@@ -347,7 +351,27 @@
 
   <main>
 
-    <section class="tab-panel" data-panel="inventario">
+    <section class="tab-panel" data-panel="buscar">
+      <div class="card">
+        <h2>Consultar disponibilidad (texto o imagen)</h2>
+        <p class="note">
+          Pega el texto de un pedido, o pega/sube una imagen (se lee el texto automáticamente).
+          Busca en TODAS las bodegas tipo Stock y Registro, y te dice qué hay, cuánto, y su estado.
+          No hace falta clave, cualquiera puede usar esto para buscar.
+        </p>
+        <textarea id="dispoTexto" style="min-height:160px;" placeholder="Pega aquí el mensaje del pedido, ej: 'necesito amarras blancas de 10cm y conectores verdes'"></textarea>
+        <div class="row" style="margin-top:10px;">
+          <button id="dispoImagenBtn">🖼️ Pegar/subir imagen</button>
+          <button class="primary" id="dispoBuscarBtn">Buscar disponibilidad</button>
+          <button id="dispoDescargarBtn">⬇ Descargar resultados</button>
+        </div>
+        <input type="file" id="dispoImagenInput" class="hidden-input" accept="image/*">
+        <div class="status" id="dispoOcrStatus"></div>
+        <div id="dispoResultados" style="margin-top:14px;"></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="inventario" style="display:none">
       <div class="group-switch" id="stockSwitcher" style="flex-wrap:wrap;"></div>
       <div id="inventarioSlot"></div>
     </section>
@@ -546,9 +570,12 @@
             <label>Nombre (opcional)</label>
             <input type="text" id="newChatName" placeholder="ej: Juan">
           </div>
-          <div class="field" style="min-width:160px;">
+          <div class="field" style="min-width:200px;">
             <label>Grupos (bodegas)</label>
-            <div id="newChatGroupsBox" style="display:flex;flex-wrap:wrap;gap:8px;padding:9px 0;"></div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px;">
+              <input type="checkbox" id="newChatTodasBodegas" checked> Todas las bodegas (incluidas las que cree después)
+            </label>
+            <div id="newChatGroupsBox" style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;"></div>
           </div>
           <div class="field" style="min-width:170px;">
             <label>Alertas automáticas</label>
@@ -697,22 +724,6 @@
         <div id="historialList" style="max-height:420px;overflow-y:auto;"></div>
       </div>
 
-      <div class="card">
-        <h2>Consultar disponibilidad (texto o imagen)</h2>
-        <p class="note">
-          Pega el texto de un pedido, o pega/sube una imagen (se lee el texto automáticamente).
-          Busca en TODAS las bodegas tipo Stock y Registro, y te dice qué hay, cuánto, y su estado.
-        </p>
-        <textarea id="dispoTexto" style="min-height:160px;" placeholder="Pega aquí el mensaje del pedido, ej: 'necesito amarras blancas de 10cm y conectores verdes'"></textarea>
-        <div class="row" style="margin-top:10px;">
-          <button id="dispoImagenBtn">🖼️ Pegar/subir imagen</button>
-          <button class="primary" id="dispoBuscarBtn">Buscar disponibilidad</button>
-          <button id="dispoDescargarBtn">⬇ Descargar resultados</button>
-        </div>
-        <input type="file" id="dispoImagenInput" class="hidden-input" accept="image/*">
-        <div class="status" id="dispoOcrStatus"></div>
-        <div id="dispoResultados" style="margin-top:14px;"></div>
-      </div>
     </section>
 
   </main>
@@ -1033,16 +1044,38 @@ async function renderEntregaCard(){
     const {data, error} = await sb.from('entregas').select('*').eq('bodega', currentStockBodega).order('creado_en', {ascending:false}).limit(20);
     if(error) throw error;
     if(!data.length){ list.innerHTML = '<span class="note" style="margin:0;">Todavía no hay entregas registradas en esta bodega.</span>'; return; }
+    const admin = isAdmin();
     list.innerHTML = '<p class="note" style="margin:0 0 8px;font-weight:600;">Entregas recientes:</p>' + data.map(en=>{
       const fecha = en.fecha ? new Date(en.fecha+'T00:00:00').toLocaleDateString('es-CO') : '';
       return `
-        <div style="padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
-          <b>${escapeHtml(en.producto)}</b> — ${en.cantidad} unidad(es) → ${escapeHtml(en.entregado_a)}
-          <span style="color:var(--text-dim);font-size:11px;"> · ${fecha}</span>
-          ${en.observacion ? `<div style="color:var(--text-mut);margin-top:2px;">${escapeHtml(en.observacion)}</div>` : ''}
+        <div style="padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+          <div>
+            <b>${escapeHtml(en.producto)}</b> — ${en.cantidad} unidad(es) → ${escapeHtml(en.entregado_a)}
+            <span style="color:var(--text-dim);font-size:11px;"> · ${fecha}</span>
+            ${en.observacion ? `<div style="color:var(--text-mut);margin-top:2px;">${escapeHtml(en.observacion)}</div>` : ''}
+          </div>
+          ${admin ? `<button class="del" data-del-entrega="${en.id}" data-entrega-producto="${escapeHtml(en.producto)}" data-entrega-cant="${en.cantidad}" title="Eliminar esta entrega">✕</button>` : ''}
         </div>
       `;
     }).join('');
+
+    list.querySelectorAll('[data-del-entrega]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.delEntrega;
+        const producto = btn.dataset.entregaProducto;
+        const cantidad = parseFloat(btn.dataset.entregaCant) || 0;
+
+        if(!confirm(`¿Eliminar esta entrega de "${producto}" (${cantidad} unidad(es))?`)) return;
+        const devolver = confirm(`¿También quieres devolver ${cantidad} al inventario? (útil si fue una prueba)\n\nAceptar = sí, devolver\nCancelar = no, solo borrar el registro`);
+
+        try{ await sb.from('entregas').delete().eq('id', id); }catch(e){ console.error(e); }
+        if(devolver){
+          const item = items.find(it=>it.grupo===currentStockBodega && it.name===producto);
+          if(item){ item.qty += cantidad; await saveItem(item); render(); }
+        }
+        renderEntregaCard();
+      });
+    });
   }catch(e){
     list.innerHTML = `<span class="note" style="margin:0;color:var(--red);">Error cargando entregas: ${escapeHtml(e.message)}</span>`;
   }
@@ -1648,7 +1681,7 @@ function renderRecipients(){
   if(!recipients.length){ box.innerHTML = '<span class="note" style="margin:0;">No hay destinatarios.</span>'; return; }
   box.innerHTML = recipients.map(r=>`
     <span class="badge ${r.recibeAuto ? 'ok' : 'warn'}" style="margin:2px 6px 2px 0;display:inline-flex;align-items:center;gap:6px;">
-      ${escapeHtml(r.nombre || r.chatId)} (${r.grupos.join(', ')}) ${r.recibeAuto ? '' : '· solo manual'}
+      ${escapeHtml(r.nombre || r.chatId)} (${r.grupos.includes('*') ? 'Todas las bodegas' : r.grupos.join(', ')}) ${r.recibeAuto ? '' : '· solo manual'}
       <button class="del" data-toggle-auto="${r.id}" title="${r.recibeAuto ? 'Pasar a solo manual' : 'Activar automáticas'}" style="padding:0;font-size:13px;">${r.recibeAuto ? '🔔' : '🔕'}</button>
       <button class="del" data-remove-chat="${r.id}" style="padding:0;font-size:13px;">✕</button>
     </span>
@@ -1681,15 +1714,23 @@ function renderNewChatGroupsBox(){
       <input type="checkbox" value="${escapeHtml(b.nombre)}" class="new-chat-grp" checked> ${escapeHtml(b.nombre)}
     </label>
   `).join('');
+  actualizarVisibilidadGruposEspecificos();
 }
+
+function actualizarVisibilidadGruposEspecificos(){
+  const todas = document.getElementById('newChatTodasBodegas').checked;
+  document.getElementById('newChatGroupsBox').style.display = todas ? 'none' : 'flex';
+}
+document.getElementById('newChatTodasBodegas').addEventListener('change', actualizarVisibilidadGruposEspecificos);
 
 document.getElementById('addRecipientBtn').addEventListener('click', async ()=>{
   const chatId = document.getElementById('newChatId').value.trim();
   const nombre = document.getElementById('newChatName').value.trim();
-  const grupos = Array.from(document.querySelectorAll('.new-chat-grp:checked')).map(el=>el.value);
+  const todasBodegas = document.getElementById('newChatTodasBodegas').checked;
+  const grupos = todasBodegas ? ['*'] : Array.from(document.querySelectorAll('.new-chat-grp:checked')).map(el=>el.value);
   const recibeAuto = document.getElementById('newChatAuto').value === 'si';
   if(!chatId || !/^-?\d+$/.test(chatId)){ setStatus('recipientsStatus','Escribe un chat_id válido.','err'); return; }
-  if(!grupos.length){ setStatus('recipientsStatus','Elige al menos una bodega/grupo.','err'); return; }
+  if(!grupos.length){ setStatus('recipientsStatus','Elige al menos una bodega/grupo (o marca "Todas las bodegas").','err'); return; }
   if(recipients.some(r=>r.chatId===chatId)){ setStatus('recipientsStatus','Ese chat_id ya está agregado.','err'); return; }
   try{
     const {data, error} = await sb.from('destinatarios').insert({chat_id:chatId, nombre, grupos, recibe_automaticas:recibeAuto}).select().single();
@@ -1722,7 +1763,7 @@ async function enviarReporte(fn){
   // no decir "enviado" cuando en el fondo no hay ningún destinatario
   // suscrito a esa bodega y el mensaje se pierde en el aire).
   if(bodegaElegida){
-    const tieneDestinatario = recipients.some(r=>(r.grupos||[]).includes(bodegaElegida));
+    const tieneDestinatario = recipients.some(r=>(r.grupos||[]).includes(bodegaElegida) || (r.grupos||[]).includes('*'));
     if(!tieneDestinatario){
       setStatus('alertStatus', `Nadie está suscrito a "${bodegaElegida}" todavía — el mensaje no le llegaría a nadie. Ve a "Destinatarios" y marca esa bodega en el grupo de alguien primero.`, 'err');
       return;
