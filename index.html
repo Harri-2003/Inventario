@@ -418,6 +418,11 @@
         </h2>
         <div id="troncalCollapseBody" style="display:none;">
           <p class="note">Registro de cable de fibra troncal entregado: cuánto, a quién, cuándo y cuánto se devuelve. No maneja mínimos ni alertas, es solo una bitácora.</p>
+          <div class="group-switch" id="tipoMaterialSwitch" style="max-width:320px;">
+            <button data-tipomat="" class="active">Todos</button>
+            <button data-tipomat="carrete">🎡 Carretos</button>
+            <button data-tipomat="chipa">✂️ Chipas</button>
+          </div>
           <div class="field" style="margin-bottom:12px;">
             <input type="text" id="troncalSearch" placeholder="Buscar material… ej: 12 hilos, 24h, spam 400">
           </div>
@@ -425,6 +430,7 @@
             <thead>
               <tr>
                 <th>Material</th>
+                <th>Tipo</th>
                 <th style="text-align:right;">Metros</th>
                 <th>Entregado a</th>
                 <th>Fecha</th>
@@ -449,6 +455,13 @@
         <p class="note">Pega un nombre de material/cable por línea. Se crea una fila por cada uno (metros, técnico, fecha y observación quedan en blanco para completar después, uno por uno). No lleva mínimo, eso no aplica aquí.</p>
         <textarea id="troncalBulkNames" placeholder="Cable ADSS 24 hilos&#10;Cable ADSS 48 hilos&#10;Cable ADSS 96 hilos"></textarea>
         <div class="row" style="margin-top:10px;">
+          <div class="field" style="max-width:180px;">
+            <label>Tipo (para todos)</label>
+            <select id="troncalBulkTipo">
+              <option value="carrete">🎡 Carrete</option>
+              <option value="chipa">✂️ Chipa</option>
+            </select>
+          </div>
           <button class="primary" id="troncalBulkAddBtn">Agregar todos</button>
         </div>
         <div class="status" id="troncalBulkStatus"></div>
@@ -456,11 +469,11 @@
 
       <div class="card" id="troncalExcelCard" style="display:none;">
         <h2>Cargar material desde Excel</h2>
-        <p class="note">Descarga la plantilla, llénala con Material y Metros, y súbela aquí. Cada fila se agrega como una entrega nueva (técnico, fecha y observación quedan en blanco para completar después).</p>
+        <p class="note">Descarga la plantilla, llénala con Material, Metros y Tipo (Carrete o Chipa), y súbela aquí. Cada fila se agrega como una entrega nueva (técnico, fecha y observación quedan en blanco para completar después).</p>
         <button id="plantillaTroncalBtn" style="margin-bottom:12px;">📋 Descargar plantilla</button>
         <div class="upload-zone" id="troncalUploadZone">
           <svg class="up-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M12 4 8 8M12 4l4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
-          Haz clic aquí o arrastra tu archivo .xlsx / .csv (columnas: Material, Metros)
+          Haz clic aquí o arrastra tu archivo .xlsx / .csv (columnas: Material, Metros, Tipo)
         </div>
         <input type="file" id="troncalFileInput" class="hidden-input" accept=".xlsx,.xls,.csv">
         <div class="status" id="troncalUploadStatus"></div>
@@ -784,7 +797,7 @@ async function loadAll(){
     permitidos = (perm.data||[]).map(r=>({id:r.id, nombre:r.nombre_exacto, etiqueta:r.etiqueta, min:Number(r.minimo_defecto), grupo:r.grupo}));
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
     schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo}));
-    troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal'}));
+    troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal', tipoMaterial:r.tipo_material||'carrete'}));
     bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, orden:r.orden}));
     if(!bodegas.some(b=>b.nombre===currentStockBodega && b.tipo==='stock')){
       const primero = bodegas.find(b=>b.lado==='inventario' && b.tipo==='stock' && !b.oculta) || bodegas.find(b=>b.tipo==='stock' && !b.oculta);
@@ -1631,6 +1644,7 @@ document.getElementById('addScheduleBtn').addEventListener('click', async ()=>{
 // ================== Troncal (registro de entregas) ==================
 let troncalEditing = false;
 let troncalSearch = '';
+let troncalTipoFiltro = '';
 
 function renderTroncal(){
   const editable = isAdmin() && troncalEditing;
@@ -1638,12 +1652,20 @@ function renderTroncal(){
   tbody.innerHTML = '';
   const q = normalizeName(troncalSearch);
   let visibles = troncalEntries.filter(en => en.bodega === currentLogBodega);
+  if(troncalTipoFiltro) visibles = visibles.filter(en => (en.tipoMaterial||'carrete') === troncalTipoFiltro);
   if(q) visibles = visibles.filter(en => normalizeName(en.material||'').includes(q));
   visibles.forEach(en=>{
     const tr = document.createElement('tr');
     const dis = editable ? '' : 'disabled';
+    const tipoMat = en.tipoMaterial || 'carrete';
     tr.innerHTML = `
       <td data-label="Material"><input type="text" value="${escapeHtml(en.material||'')}" ${dis} data-tfield="material" data-tid="${en.id}" style="width:100%;"></td>
+      <td data-label="Tipo">
+        <select ${dis} data-tfield="tipoMaterial" data-tid="${en.id}">
+          <option value="carrete" ${tipoMat==='carrete'?'selected':''}>🎡 Carrete</option>
+          <option value="chipa" ${tipoMat==='chipa'?'selected':''}>✂️ Chipa</option>
+        </select>
+      </td>
       <td style="text-align:right;" data-label="Metros"><input type="number" min="0" value="${en.metros}" ${dis} data-tfield="metros" data-tid="${en.id}" style="width:90px;text-align:right;"></td>
       <td data-label="Entregado a"><input type="text" value="${escapeHtml(en.entregadoA||'')}" ${dis} data-tfield="entregadoA" data-tid="${en.id}" style="width:100%;"></td>
       <td data-label="Fecha"><input type="date" value="${en.fecha||''}" ${dis} data-tfield="fecha" data-tid="${en.id}"></td>
@@ -1661,6 +1683,7 @@ function renderTroncal(){
         const field = e.target.dataset.tfield;
         en[field] = (field==='metros'||field==='devuelto') ? (parseFloat(e.target.value)||0) : e.target.value;
         await saveTroncal(en);
+        if(field==='tipoMaterial') renderTroncal();
       });
     });
     tbody.querySelectorAll('[data-remove-troncal]').forEach(btn=>{
@@ -1686,7 +1709,8 @@ async function saveTroncal(en){
       entregado_a: en.entregadoA || null, fecha: en.fecha || null,
       devuelto: en.devuelto || 0,
       observacion: en.observacion || null,
-      bodega: en.bodega || currentLogBodega
+      bodega: en.bodega || currentLogBodega,
+      tipo_material: en.tipoMaterial || 'carrete'
     };
     if(en.id && en.id.length===36) payload.id = en.id;
     const {data, error} = await sb.from('troncal_entregas').upsert(payload).select().single();
@@ -1702,6 +1726,14 @@ document.getElementById('invSearch').addEventListener('input', (e)=>{
 
 document.getElementById('troncalSearch').addEventListener('input', (e)=>{
   troncalSearch = e.target.value;
+  renderTroncal();
+});
+
+document.getElementById('tipoMaterialSwitch').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button');
+  if(!btn) return;
+  troncalTipoFiltro = btn.dataset.tipomat;
+  document.querySelectorAll('#tipoMaterialSwitch button').forEach(b=>b.classList.toggle('active', b===btn));
   renderTroncal();
 });
 
@@ -1721,6 +1753,7 @@ document.getElementById('troncalEditBtn').addEventListener('click', ()=>{
 document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
   const tecnico = window.prompt('¿Nombre del técnico que se lo llevó?');
   if(tecnico === null) return; // canceló
+  const esCarrete = confirm('¿Qué tipo de material es?\n\nAceptar = 🎡 Carrete (rollo completo)\nCancelar = ✂️ Chipa (retazo/corte)');
 
   const en = {
     id: uid(),
@@ -1730,7 +1763,8 @@ document.getElementById('addTroncalBtn').addEventListener('click', async ()=>{
     fecha: '',
     devuelto: 0,
     observacion: '',
-    bodega: currentLogBodega
+    bodega: currentLogBodega,
+    tipoMaterial: esCarrete ? 'carrete' : 'chipa'
   };
   troncalEntries.unshift(en);
   renderTroncal();
@@ -1757,12 +1791,13 @@ document.getElementById('cleanDatesBtn').addEventListener('click', async ()=>{
 
 document.getElementById('troncalBulkAddBtn').addEventListener('click', async ()=>{
   const raw = document.getElementById('troncalBulkNames').value;
+  const tipoMaterial = document.getElementById('troncalBulkTipo').value;
   const nombres = raw.split('\n').map(s=>s.trim()).filter(Boolean);
   if(!nombres.length){ setStatus('troncalBulkStatus','Pega al menos un nombre de material.','err'); return; }
 
   let agregados = 0;
   for(const material of nombres){
-    const en = {id:uid(), material, metros:0, entregadoA:'', fecha:'', devuelto:0, observacion:'', bodega:currentLogBodega};
+    const en = {id:uid(), material, metros:0, entregadoA:'', fecha:'', devuelto:0, observacion:'', bodega:currentLogBodega, tipoMaterial};
     troncalEntries.unshift(en);
     await saveTroncal(en);
     agregados++;
@@ -2139,7 +2174,7 @@ document.getElementById('plantillaInvBtn').addEventListener('click', ()=>{
 });
 
 document.getElementById('plantillaTroncalBtn').addEventListener('click', ()=>{
-  descargarPlantilla(['Material','Metros'], 'plantilla_troncal.xlsx');
+  descargarPlantilla(['Material','Metros','Tipo (Carrete o Chipa)'], 'plantilla_troncal.xlsx');
 });
 
 // ================== Cargar Troncal desde Excel ==================
@@ -2171,6 +2206,7 @@ function handleTroncalFile(file){
       const headers = rows[0];
       let nameCol = findCol(headers, ['material','producto','nombre','cable']);
       let metrosCol = findCol(headers, ['metros','cantidad']);
+      let tipoCol = findCol(headers, ['tipo']);
       if(nameCol===-1) nameCol = 0;
       if(metrosCol===-1) metrosCol = 1;
 
@@ -2180,7 +2216,9 @@ function handleTroncalFile(file){
         const material = String(r[nameCol]||'').trim();
         if(!material) continue;
         const metros = parseFloat(r[metrosCol]);
-        const en = {id:uid(), material, metros: isNaN(metros)?0:metros, entregadoA:'', fecha:'', devuelto:0, observacion:'', bodega:currentLogBodega};
+        const tipoTexto = tipoCol!==-1 ? normalizeName(String(r[tipoCol]||'')) : '';
+        const tipoMaterial = tipoTexto.includes('chipa') ? 'chipa' : 'carrete';
+        const en = {id:uid(), material, metros: isNaN(metros)?0:metros, entregadoA:'', fecha:'', devuelto:0, observacion:'', bodega:currentLogBodega, tipoMaterial};
         troncalEntries.unshift(en);
         await saveTroncal(en);
         agregados++;
@@ -2278,11 +2316,11 @@ document.getElementById('exportTroncalBtn').addEventListener('click', async ()=>
   const filasBodega = troncalEntries.filter(en=>en.bodega===currentLogBodega);
   if(!filasBodega.length){ setStatus('troncalAlertStatus','No hay entregas para exportar.','err'); return; }
   const filas = filasBodega.map(en=>[
-    en.material, en.metros, en.entregadoA || '', en.fecha || '', en.observacion || ''
+    en.material, (en.tipoMaterial==='chipa'?'Chipa':'Carrete'), en.metros, en.entregadoA || '', en.fecha || '', en.observacion || ''
   ]);
   await descargarExcelFormateado({
     titulo: `REGISTRO DE ENTREGAS – ${currentLogBodega.toUpperCase()}`,
-    columnas: ['MATERIAL','METROS','ENTREGADO A','FECHA','OBSERVACIÓN / DEVUELTO'],
+    columnas: ['MATERIAL','TIPO','METROS','ENTREGADO A','FECHA','OBSERVACIÓN / DEVUELTO'],
     filas
   });
   setStatus('troncalAlertStatus', 'Excel descargado.', 'ok');
