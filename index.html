@@ -953,6 +953,7 @@ function render(){
   document.getElementById('invEditBtn').textContent = editable ? '✔ Guardar y cerrar' : '🔒 Editar';
 
   renderSummary();
+  renderEntregaProductoOptions(); // mantiene el selector de "Registrar entrega" siempre al día
 }
 
 async function saveItem(it){
@@ -1001,8 +1002,12 @@ function renderSummary(){
 }
 
 // ================== Registrar entrega (bodegas corporativas) ==================
-async function renderEntregaCard(){
+// Rápida y sin red: solo muestra/oculta la tarjeta y actualiza la lista de
+// productos disponibles. Se llama cada vez que el inventario cambia (Excel,
+// edición manual, etc.) para que el selector nunca quede desactualizado.
+function renderEntregaProductoOptions(){
   const card = document.getElementById('entregaCard');
+  if(!card) return;
   const b = bodegas.find(x=>x.nombre===currentStockBodega);
   if(!b || !b.registraEntregas){ card.style.display = 'none'; return; }
   card.style.display = '';
@@ -1011,7 +1016,16 @@ async function renderEntregaCard(){
   const enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
   const actual = sel.value;
   sel.innerHTML = enEstaBodega.map(it=>`<option value="${escapeHtml(it.name)}">${escapeHtml(it.name)} (hay ${it.qty})</option>`).join('');
-  if(actual) sel.value = actual;
+  if(actual && enEstaBodega.some(it=>it.name===actual)) sel.value = actual;
+}
+
+// Completa: además trae de Supabase el listado de entregas recientes. Se usa
+// al entrar/cambiar de bodega, no en cada tecla (para no golpear la red de más).
+async function renderEntregaCard(){
+  renderEntregaProductoOptions();
+  const card = document.getElementById('entregaCard');
+  const b = bodegas.find(x=>x.nombre===currentStockBodega);
+  if(!b || !b.registraEntregas) return;
 
   const list = document.getElementById('entregasRecientesList');
   list.innerHTML = '<span class="note" style="margin:0;">Cargando entregas recientes…</span>';
@@ -1504,16 +1518,26 @@ async function crearBodegaRapida(lado){
     'Aceptar = con MÍNIMOS (como Inventario: Agotado/Por acabarse/Ok)\n' +
     'Cancelar = REGISTRO (como Troncal: bitácora, sin mínimos)'
   );
+
+  let modoAlertas = 'automaticas';
+  if(!confirm('¿Quieres que avise SOLA por Telegram cuando algo se agote en esta bodega?\n\nAceptar = Sí, automáticas\nCancelar = No (elegir otra opción)')){
+    if(confirm('¿Igual quieres poder enviar el reporte cuando TÚ quieras (manual)?\n\nAceptar = Sí, solo manual\nCancelar = No, nada de Telegram (solo se ve en la página)')){
+      modoAlertas = 'manual';
+    } else {
+      modoAlertas = 'ninguna';
+    }
+  }
+
   const b = {
     id:uid(), nombre:nombre.trim(), tipo: esStock?'stock':'log',
     lado, // dónde aparece (Inventario o Troncal) — independiente de cómo se comporta
-    modoAlertas:'automaticas', oculta:false, sinFiltro:false, registraEntregas:false, orden:bodegas.length+1
+    modoAlertas, oculta:false, sinFiltro:false, registraEntregas:false, orden:bodegas.length+1
   };
   bodegas.push(b);
   await saveBodega(b);
   renderBodegasAdmin();
   renderHistorialBodegaSelect();
-      renderReporteManualBodegaSelect();
+  renderReporteManualBodegaSelect();
   renderNewChatGroupsBox();
   seleccionarBodega(b);
 }
@@ -1693,6 +1717,21 @@ function renderReporteManualBodegaSelect(){
 
 async function enviarReporte(fn){
   const bodegaElegida = document.getElementById('reporteManualBodegaSelect').value || null;
+
+  // Antes de enviar, avisa si en realidad no le va a llegar a nadie (para
+  // no decir "enviado" cuando en el fondo no hay ningún destinatario
+  // suscrito a esa bodega y el mensaje se pierde en el aire).
+  if(bodegaElegida){
+    const tieneDestinatario = recipients.some(r=>(r.grupos||[]).includes(bodegaElegida));
+    if(!tieneDestinatario){
+      setStatus('alertStatus', `Nadie está suscrito a "${bodegaElegida}" todavía — el mensaje no le llegaría a nadie. Ve a "Destinatarios" y marca esa bodega en el grupo de alguien primero.`, 'err');
+      return;
+    }
+  } else if(!recipients.length){
+    setStatus('alertStatus', 'No hay destinatarios agregados todavía. Ve a "Destinatarios" y agrega al menos uno.', 'err');
+    return;
+  }
+
   setStatus('alertStatus', 'Enviando...', '');
   try{
     const {error} = await sb.rpc(fn, {grupo_filtro: bodegaElegida});
