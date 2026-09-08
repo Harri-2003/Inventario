@@ -400,6 +400,34 @@
           </div>
         </div>
       </div>
+
+      <div class="card" id="entregaCard" style="display:none;">
+        <h2>Registrar entrega</h2>
+        <p class="note">Elige el producto, cuánto se entrega y a quién. Se descuenta solo de esta bodega y queda guardado con tu observación — no hace falta calcular nada a mano.</p>
+        <div class="row">
+          <div class="field">
+            <label>Producto</label>
+            <select id="entregaProducto"></select>
+          </div>
+          <div class="field" style="max-width:120px;">
+            <label>Cantidad</label>
+            <input type="number" id="entregaCantidad" min="0" value="1">
+          </div>
+          <div class="field">
+            <label>Entregado a</label>
+            <input type="text" id="entregaA" placeholder="Nombre de la persona">
+          </div>
+        </div>
+        <div class="field" style="margin-top:10px;">
+          <label>Observación (opcional)</label>
+          <input type="text" id="entregaObservacion" placeholder="ej: evento corporativo, capacitación, etc.">
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button class="primary" id="registrarEntregaBtn">Registrar entrega</button>
+        </div>
+        <div class="status" id="entregaStatus"></div>
+        <div id="entregasRecientesList" style="margin-top:14px;"></div>
+      </div>
     </div>
 
     <section class="tab-panel" data-panel="troncal" style="display:none">
@@ -565,6 +593,7 @@
           (con mínimos y estado tipo Inventario, o registro/bitácora tipo Troncal) — son independientes: puedes tener
           una bodega que aparezca en Troncal pero se comporte con mínimos, o al revés.
           "Ninguna" en alertas = ni automática ni manual, solo se ve en la página. "Oculta" = solo tú la ves, con tu clave.
+          "Registra entregas" agrega una herramienta para anotar "se entregó X a Fulano, por tal motivo" que descuenta sola del inventario.
         </p>
         <table>
           <thead>
@@ -575,12 +604,13 @@
               <th>Alertas</th>
               <th>Oculta</th>
               <th>Sin filtro*</th>
+              <th>Entregas*</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="bodegasTbody"></tbody>
         </table>
-        <p class="note" style="margin:8px 0 0;">*Sin filtro: solo aplica a bodegas con mínimos. Si está marcado, el Excel se importa completo, sin lista blanca.</p>
+        <p class="note" style="margin:8px 0 0;">*Sin filtro y Entregas: solo aplican a bodegas con mínimos.</p>
         <div class="footer-actions">
           <button id="addBodegaBtn">+ Agregar bodega</button>
         </div>
@@ -798,7 +828,7 @@ async function loadAll(){
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
     schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo}));
     troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal', tipoMaterial:r.tipo_material||'carrete'}));
-    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, orden:r.orden}));
+    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, registraEntregas:r.registra_entregas, orden:r.orden}));
     if(!bodegas.some(b=>b.nombre===currentStockBodega && b.tipo==='stock')){
       const primero = bodegas.find(b=>b.lado==='inventario' && b.tipo==='stock' && !b.oculta) || bodegas.find(b=>b.tipo==='stock' && !b.oculta);
       if(primero) currentStockBodega = primero.nombre;
@@ -838,6 +868,7 @@ async function loadAll(){
   renderStockSwitcher();
   renderLogSwitcher();
   renderReporteManualBodegaSelect();
+  renderEntregaCard();
 }
 
 let realtimeDebounce = null;
@@ -968,6 +999,74 @@ function renderSummary(){
     <div class="metric ok"><div class="n" style="color:var(--apc-green)">${ok}</div><div class="l">En buen nivel</div></div>
   `;
 }
+
+// ================== Registrar entrega (bodegas corporativas) ==================
+async function renderEntregaCard(){
+  const card = document.getElementById('entregaCard');
+  const b = bodegas.find(x=>x.nombre===currentStockBodega);
+  if(!b || !b.registraEntregas){ card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  const sel = document.getElementById('entregaProducto');
+  const enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
+  const actual = sel.value;
+  sel.innerHTML = enEstaBodega.map(it=>`<option value="${escapeHtml(it.name)}">${escapeHtml(it.name)} (hay ${it.qty})</option>`).join('');
+  if(actual) sel.value = actual;
+
+  const list = document.getElementById('entregasRecientesList');
+  list.innerHTML = '<span class="note" style="margin:0;">Cargando entregas recientes…</span>';
+  try{
+    const {data, error} = await sb.from('entregas').select('*').eq('bodega', currentStockBodega).order('creado_en', {ascending:false}).limit(20);
+    if(error) throw error;
+    if(!data.length){ list.innerHTML = '<span class="note" style="margin:0;">Todavía no hay entregas registradas en esta bodega.</span>'; return; }
+    list.innerHTML = '<p class="note" style="margin:0 0 8px;font-weight:600;">Entregas recientes:</p>' + data.map(en=>{
+      const fecha = en.fecha ? new Date(en.fecha+'T00:00:00').toLocaleDateString('es-CO') : '';
+      return `
+        <div style="padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
+          <b>${escapeHtml(en.producto)}</b> — ${en.cantidad} unidad(es) → ${escapeHtml(en.entregado_a)}
+          <span style="color:var(--text-dim);font-size:11px;"> · ${fecha}</span>
+          ${en.observacion ? `<div style="color:var(--text-mut);margin-top:2px;">${escapeHtml(en.observacion)}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+  }catch(e){
+    list.innerHTML = `<span class="note" style="margin:0;color:var(--red);">Error cargando entregas: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+document.getElementById('registrarEntregaBtn').addEventListener('click', async ()=>{
+  const nombreProducto = document.getElementById('entregaProducto').value;
+  const cantidad = parseFloat(document.getElementById('entregaCantidad').value);
+  const entregadoA = document.getElementById('entregaA').value.trim();
+  const observacion = document.getElementById('entregaObservacion').value.trim();
+
+  if(!nombreProducto){ setStatus('entregaStatus', 'No hay productos en esta bodega para entregar.', 'err'); return; }
+  if(!cantidad || cantidad <= 0){ setStatus('entregaStatus', 'Escribe una cantidad mayor a 0.', 'err'); return; }
+  if(!entregadoA){ setStatus('entregaStatus', 'Escribe a quién se le entrega.', 'err'); return; }
+
+  const item = items.find(it=>it.grupo===currentStockBodega && it.name===nombreProducto);
+  if(!item){ setStatus('entregaStatus', 'No encontré ese producto en esta bodega.', 'err'); return; }
+  if(cantidad > item.qty){
+    if(!confirm(`Solo hay ${item.qty} disponibles y estás entregando ${cantidad}. ¿Continuar de todos modos? (quedaría en 0)`)) return;
+  }
+
+  item.qty = Math.max(0, item.qty - cantidad);
+  await saveItem(item);
+
+  try{
+    await sb.from('entregas').insert({
+      bodega: currentStockBodega, producto: nombreProducto, cantidad,
+      entregado_a: entregadoA, observacion: observacion || null
+    });
+  }catch(e){ console.error(e); }
+
+  render();
+  renderEntregaCard();
+  document.getElementById('entregaCantidad').value = '1';
+  document.getElementById('entregaA').value = '';
+  document.getElementById('entregaObservacion').value = '';
+  setStatus('entregaStatus', `Entrega registrada: ${cantidad} de "${nombreProducto}" a ${entregadoA}. Quedan ${item.qty}.`, 'ok');
+});
 
 document.getElementById('invEditBtn').addEventListener('click', ()=>{
   if(invEditing){
@@ -1266,6 +1365,7 @@ function renderBodegasAdmin(){
       </td>
       <td data-label="Oculta" style="text-align:center;"><input type="checkbox" data-bfield="oculta" data-bid="${b.id}" ${b.oculta?'checked':''}></td>
       <td data-label="Sin filtro" style="text-align:center;"><input type="checkbox" data-bfield="sinFiltro" data-bid="${b.id}" ${b.sinFiltro?'checked':''} ${b.tipo!=='stock'?'disabled':''}></td>
+      <td data-label="Registra entregas" style="text-align:center;"><input type="checkbox" data-bfield="registraEntregas" data-bid="${b.id}" ${b.registraEntregas?'checked':''} ${b.tipo!=='stock'?'disabled':''} title="Agrega una herramienta para anotar entregas que descuentan solas del inventario"></td>
       <td data-label="">
         <button class="primary" data-guardar-bodega="${b.id}" style="font-size:11px;padding:6px 10px;">💾 Guardar</button>
         <button class="del" data-remove-bodega="${b.id}" title="Eliminar">✕</button>
@@ -1280,7 +1380,7 @@ function renderBodegasAdmin(){
       const b = bodegas.find(x=>x.id===e.target.dataset.bid);
       if(!b) return;
       const field = e.target.dataset.bfield;
-      b[field] = field==='oculta'||field==='sinFiltro' ? e.target.checked : e.target.value;
+      b[field] = field==='oculta'||field==='sinFiltro'||field==='registraEntregas' ? e.target.checked : e.target.value;
       if(field==='tipo'){
         // "sin filtro" solo aplica a bodegas con mínimos; refresca para des/habilitar el checkbox
         renderBodegasAdmin();
@@ -1330,7 +1430,7 @@ function renderBodegasAdmin(){
 
 async function saveBodega(b){
   try{
-    const payload = { nombre:b.nombre, tipo:b.tipo, lado: b.lado || (b.tipo==='stock'?'inventario':'troncal'), modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro };
+    const payload = { nombre:b.nombre, tipo:b.tipo, lado: b.lado || (b.tipo==='stock'?'inventario':'troncal'), modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro, registra_entregas:!!b.registraEntregas };
     let query;
     if(b.id && b.id.length===36){
       payload.id = b.id;
@@ -1351,7 +1451,7 @@ document.getElementById('addBodegaBtn').addEventListener('click', async ()=>{
   let nombreBase = 'Nueva bodega', n = 1;
   while(bodegas.some(x=>normalizeName(x.nombre)===normalizeName(n===1?nombreBase:`${nombreBase} ${n}`))) n++;
   const nombre = n===1 ? nombreBase : `${nombreBase} ${n}`;
-  const b = {id:uid(), nombre, tipo:'stock', lado:'inventario', modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1};
+  const b = {id:uid(), nombre, tipo:'stock', lado:'inventario', modoAlertas:'automaticas', oculta:false, sinFiltro:false, registraEntregas:false, orden:bodegas.length+1};
   bodegas.push(b);
   renderBodegasAdmin();
   await saveBodega(b);
@@ -1407,7 +1507,7 @@ async function crearBodegaRapida(lado){
   const b = {
     id:uid(), nombre:nombre.trim(), tipo: esStock?'stock':'log',
     lado, // dónde aparece (Inventario o Troncal) — independiente de cómo se comporta
-    modoAlertas:'automaticas', oculta:false, sinFiltro:false, orden:bodegas.length+1
+    modoAlertas:'automaticas', oculta:false, sinFiltro:false, registraEntregas:false, orden:bodegas.length+1
   };
   bodegas.push(b);
   await saveBodega(b);
@@ -1453,6 +1553,7 @@ function seleccionarBodega(b){
     document.getElementById('stockViewTitle').textContent = enInventario ? 'Inventario' : `Inventario — ${b.nombre}`;
     moverBloqueA(slotId, 'stockViewBlock');
     render();
+    renderEntregaCard();
   } else {
     currentLogBodega = b.nombre;
     document.getElementById('logViewTitle').textContent = enInventario ? `Registro — ${b.nombre}` : 'Registro de entregas — Troncal';
