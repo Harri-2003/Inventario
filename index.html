@@ -1120,12 +1120,14 @@ document.getElementById('invEditBtn').addEventListener('click', ()=>{
     invEditing = false;
     sessionStorage.removeItem('admin-unlocked'); // pide la clave de nuevo la próxima vez
     render();
+    renderEntregaCard();
     setStatus('uploadStatus','Cambios guardados. Edición cerrada.','ok');
     return;
   }
   if(!requireAdmin()) return;
   invEditing = true;
   render();
+  renderEntregaCard();
 });
 
 document.getElementById('addRowBtn').addEventListener('click', async ()=>{
@@ -2100,6 +2102,16 @@ document.getElementById('dispoImagenInput').addEventListener('change', async (e)
   }
 });
 
+// Si borras todo el texto de búsqueda, se limpian también los resultados
+// (para que no se quede viendo algo que ya no corresponde a nada escrito).
+document.getElementById('dispoTexto').addEventListener('input', (e)=>{
+  if(!e.target.value.trim()){
+    document.getElementById('dispoResultados').innerHTML = '';
+    ultimoResultadoDispo = [];
+    setStatus('dispoOcrStatus', '', '');
+  }
+});
+
 // Pegar imagen directo con Ctrl+V dentro del cuadro de texto
 document.getElementById('dispoTexto').addEventListener('paste', async (e)=>{
   const items = Array.from(e.clipboardData.items || []);
@@ -2258,6 +2270,7 @@ function switchTab(name){
     troncalEditing = false;
     render();
     renderTroncal();
+    renderEntregaCard();
     updateRecipientsVisibility(false);
   }
 
@@ -2277,6 +2290,7 @@ document.getElementById('adminGearBtn').addEventListener('click', ()=>{
   if(!requireAdmin()) return;
   render();
   renderTroncal();
+  renderEntregaCard();
   cargarHistorial();
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>{ p.style.display = (p.dataset.panel==='admin') ? '' : 'none'; });
