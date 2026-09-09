@@ -139,23 +139,6 @@
   /* ---------- Barra lateral en PC (pantallas anchas) ----------
      El celular no se toca: esta regla solo aplica desde 900px de ancho
      en adelante, así que en móvil sigue viéndose igual que siempre. */
-  @media (min-width: 900px){
-    .app{max-width:none;margin:0;padding:0;}
-    .topbar{margin:0;padding:14px 24px;}
-    .summary, #setupBanner{margin-left:230px;padding:0 28px;max-width:900px;}
-    main{margin-left:230px;padding:0 28px 40px;max-width:900px;}
-    .tabs{
-      position:fixed;left:0;top:65px;bottom:0;width:210px;
-      flex-direction:column;align-items:stretch;gap:2px;
-      border-radius:0;border:none;border-right:1px solid var(--line);
-      background:var(--panel);padding:16px 12px;overflow-y:auto;
-      margin:0;z-index:30;
-    }
-    .tab-btn{flex:none;flex-direction:row;justify-content:flex-start;padding:10px 12px;font-size:13px;}
-    .tab-btn svg{width:18px;height:18px;}
-    .tab-btn.active{background:var(--cyan-dim);color:var(--cyan);border-left:none;border-radius:var(--radius-sm);}
-  }
-
   /* ---------- Cards ---------- */
   .card{
     background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
