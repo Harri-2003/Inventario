@@ -768,7 +768,9 @@
         <h2>Verificar pedido</h2>
         <p class="note">
           Pega un pedido con cantidades, uno por línea (ej: "100 Tensores Metálicos"), o pega/sube una foto del mensaje.
-          Te dice si tienes lo suficiente de cada cosa, cuánto hay, y qué falta. Sección privada, solo para quien tenga este permiso.
+          Te dice si tienes lo suficiente de cada cosa, cuánto hay, y qué falta. También te muestra cuánto <b>quedaría</b> de cada
+          producto si se entregara ese pedido — esto es solo una simulación visual, <b>no descuenta nada de verdad</b>, tu inventario real no cambia.
+          Sección privada, solo para quien tenga este permiso.
         </p>
         <textarea id="pedidoTexto" style="min-height:180px;" placeholder="3 Carretos de fibra drop 1 hilo&#10;100 Tensores metálicos&#10;10 Ont Tp Link&#10;30 Stickers&#10;50 Rosetas"></textarea>
         <div class="row" style="margin-top:10px;">
@@ -930,6 +932,21 @@
         </p>
         <button class="primary" id="generarRespaldoBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h6"/></svg> Descargar respaldo completo (Excel)</button>
         <div class="status" id="respaldoStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Reglas de conversión para pedidos</h2>
+        <p class="note">
+          Se aplican solas al verificar un pedido. "Multiplicador": cuando el pedido menciona el patrón, la cantidad pedida
+          se multiplica por el factor antes de comparar contra el stock (ej: "1 fibra drop 1 hilo" → 1 × 1000 = 1000 metros).
+          "Sinónimo": cuando el pedido menciona el patrón, también busca por el nombre real (ej: "grapas planas" también
+          encuentra "grapas cuadradas").
+        </p>
+        <div id="reglasPedidosLista"></div>
+        <div class="footer-actions">
+          <button id="addReglaPedidoBtn">+ Agregar regla</button>
+        </div>
+        <div class="status" id="reglasPedidosStatus"></div>
       </div>
 
       <div class="card">
@@ -3217,6 +3234,99 @@ function buscarLineaEnLista(palabras, lista){
 
 // ================== Verificar pedido (cantidades contra el stock real) ==================
 let ultimoResultadoPedido = [];
+let reglasPedidos = [];
+
+async function cargarReglasPedidos(){
+  try{
+    const {data, error} = await sb.from('reglas_pedidos').select('*').order('creado_en', {ascending:true});
+    if(error) throw error;
+    reglasPedidos = (data||[]).map(r=>({id:r.id, patron:r.patron, tipo:r.tipo, factor:r.factor, aliasDe:r.alias_de}));
+  }catch(e){ console.error('No se pudieron cargar las reglas de pedidos:', e); }
+  dibujarReglasPedidos();
+}
+
+function dibujarReglasPedidos(){
+  const box = document.getElementById('reglasPedidosLista');
+  if(!box) return;
+  box.innerHTML = reglasPedidos.map(r=>`
+    <div style="border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-bottom:10px;">
+      <div class="row">
+        <div class="field">
+          <label>Patrón (frase que aparece en el pedido)</label>
+          <input type="text" value="${escapeHtml(r.patron)}" data-rfield="patron" data-rid="${r.id}" placeholder="ej: fibra drop 1 hilo">
+        </div>
+        <div class="field" style="max-width:160px;">
+          <label>Tipo</label>
+          <select data-rfield="tipo" data-rid="${r.id}">
+            <option value="multiplicador" ${r.tipo==='multiplicador'?'selected':''}>Multiplicador</option>
+            <option value="sinonimo" ${r.tipo==='sinonimo'?'selected':''}>Sinónimo</option>
+          </select>
+        </div>
+        ${r.tipo==='multiplicador' ? `
+          <div class="field" style="max-width:120px;">
+            <label>Factor</label>
+            <input type="number" value="${r.factor||''}" data-rfield="factor" data-rid="${r.id}" placeholder="ej: 1000">
+          </div>
+        ` : `
+          <div class="field">
+            <label>Nombre real (alias)</label>
+            <input type="text" value="${escapeHtml(r.aliasDe||'')}" data-rfield="aliasDe" data-rid="${r.id}" placeholder="ej: grapas cuadradas">
+          </div>
+        `}
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="primary" data-guardar-regla="${r.id}" style="font-size:11px;padding:6px 10px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h6"/></svg> Guardar</button>
+        <button class="del" data-remove-regla="${r.id}">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+
+  box.querySelectorAll('[data-rfield]').forEach(inp=>{
+    inp.addEventListener('change', (e)=>{
+      const r = reglasPedidos.find(x=>x.id===e.target.dataset.rid);
+      if(!r) return;
+      const field = e.target.dataset.rfield;
+      r[field] = field==='factor' ? parseFloat(e.target.value)||null : e.target.value;
+      if(field==='tipo') dibujarReglasPedidos(); // refresca para mostrar Factor o Alias según corresponda
+    });
+  });
+
+  box.querySelectorAll('[data-guardar-regla]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const r = reglasPedidos.find(x=>x.id===btn.dataset.guardarRegla);
+      if(!r) return;
+      if(!r.patron || !r.patron.trim()){ setStatus('reglasPedidosStatus','El patrón no puede quedar vacío.','err'); return; }
+      try{
+        const payload = {patron:r.patron.trim(), tipo:r.tipo, factor: r.tipo==='multiplicador'?r.factor:null, alias_de: r.tipo==='sinonimo'?r.aliasDe:null};
+        if(r.id && r.id.length===36){
+          payload.id = r.id;
+          await sb.from('reglas_pedidos').upsert(payload);
+        } else {
+          const {data} = await sb.from('reglas_pedidos').insert(payload).select().single();
+          r.id = data.id;
+        }
+        setStatus('reglasPedidosStatus', 'Regla guardada.', 'ok');
+      }catch(e){
+        setStatus('reglasPedidosStatus', 'Error: ' + e.message, 'err');
+      }
+    });
+  });
+
+  box.querySelectorAll('[data-remove-regla]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.removeRegla;
+      if(!confirm('¿Eliminar esta regla?')) return;
+      reglasPedidos = reglasPedidos.filter(x=>x.id!==id);
+      dibujarReglasPedidos();
+      if(id.length===36){ try{ await sb.from('reglas_pedidos').delete().eq('id', id); }catch(e){} }
+    });
+  });
+}
+
+document.getElementById('addReglaPedidoBtn').addEventListener('click', ()=>{
+  reglasPedidos.push({id:uid(), patron:'', tipo:'multiplicador', factor:null, aliasDe:''});
+  dibujarReglasPedidos();
+});
 
 // Separa "100 Tensores Metálicos" en {cantidad: 100, texto: "Tensores Metálicos"}.
 // Si la línea no empieza con número, se trata como cantidad desconocida (solo busca, no compara).
@@ -3224,6 +3334,39 @@ function separarCantidadYTexto(linea){
   const m = linea.trim().match(/^(\d+)\s*[xX]?\s+(.+)$/);
   if(m) return {cantidad: parseInt(m[1]), texto: m[2]};
   return {cantidad: null, texto: linea.trim()};
+}
+
+// Compara un patrón de regla (ej: "bolsa de grapa redonda") contra el texto
+// de una línea de pedido, tolerando plurales y palabras de más/menos — igual
+// de flexible que el buscador principal, para que no falle por detalles así.
+function patronCoincide(patron, textoNorm){
+  const palabrasPatron = palabrasClave(patron);
+  if(!palabrasPatron.length) return false;
+  const palabrasTexto = textoNorm.split(/\s+/).filter(Boolean);
+  const coincidencias = palabrasPatron.filter(pp => palabrasTexto.some(pt => pt.includes(pp) || pp.includes(pt))).length;
+  return coincidencias >= Math.max(1, Math.ceil(palabrasPatron.length * 0.75));
+}
+
+// Aplica las reglas internas (multiplicador de unidades, sinónimos de nombre)
+// a una línea de pedido ya separada en cantidad+texto.
+function aplicarReglasPedido(texto, cantidad){
+  const textoNorm = normalizeName(texto);
+  let cantidadReal = cantidad;
+  let textoBusqueda = texto;
+  const notas = [];
+
+  reglasPedidos.forEach(regla=>{
+    if(!patronCoincide(regla.patron, textoNorm)) return;
+    if(regla.tipo === 'multiplicador' && cantidad !== null && regla.factor){
+      cantidadReal = cantidad * Number(regla.factor);
+      notas.push(`${cantidad} × ${Number(regla.factor)} = ${cantidadReal} (${regla.patron})`);
+    } else if(regla.tipo === 'sinonimo' && regla.aliasDe){
+      textoBusqueda += ' ' + regla.aliasDe;
+      notas.push(`también se buscó como "${regla.aliasDe}"`);
+    }
+  });
+
+  return {cantidadReal, textoBusqueda, nota: notas.join(' · ')};
 }
 
 document.getElementById('verificarPedidoBtn').addEventListener('click', async ()=>{
@@ -3248,46 +3391,67 @@ document.getElementById('verificarPedidoBtn').addEventListener('click', async ()
   let html = '';
   let faltantes = 0;
 
-  lineas.forEach(linea=>{
-    const {cantidad, texto} = separarCantidadYTexto(linea);
-    const palabras = palabrasClave(texto);
+  lineas.forEach(lineaOriginal=>{
+    const {cantidad: cantidadPedida, texto: textoPedido} = separarCantidadYTexto(lineaOriginal);
+    const {cantidadReal, textoBusqueda, nota} = aplicarReglasPedido(textoPedido, cantidadPedida);
+    const cantidad = cantidadReal; // la cantidad YA convertida es la que se compara contra el stock
+
+    const palabras = palabrasClave(textoBusqueda);
     const resultados = palabras.length ? buscarLineaEnLista(palabras, todosStock) : [];
 
     html += `<div style="padding:10px 0;border-bottom:1px solid var(--line-soft);">`;
-    html += `<p style="margin:0 0 6px;font-weight:700;">${cantidad!==null ? `${cantidad} × ` : ''}${escapeHtml(texto)}</p>`;
+    html += `<p style="margin:0 0 2px;font-weight:700;">${cantidadPedida!==null ? `${cantidadPedida} × ` : ''}${escapeHtml(textoPedido)}</p>`;
+    if(nota) html += `<p class="note" style="margin:0 0 6px;font-style:italic;">${escapeHtml(nota)}</p>`;
 
     if(!resultados.length){
       html += `<p class="note" style="margin:0;color:var(--red);">No lo encontré en el sistema.</p>`;
-      ultimoResultadoPedido.push({pedido:linea, cantidadPedida:cantidad||'', producto:'', bodega:'', disponible:'', estado:'NO ENCONTRADO'});
+      ultimoResultadoPedido.push({pedido:lineaOriginal, cantidadPedida:cantidadPedida||'', cantidadReal:cantidad||'', producto:'', bodega:'', disponible:'', estado:'NO ENCONTRADO'});
       faltantes++;
     } else {
       resultados.slice(0,5).forEach(({it})=>{
-        let estado, clase;
+        let estado, clase, quedaria = null;
         if(cantidad===null){
           estado = it.qty>0 ? 'Disponible' : 'Agotado';
           clase = it.qty>0 ? 'ok' : 'low';
-        } else if(it.qty >= cantidad){
-          estado = 'Alcanza';
-          clase = 'ok';
-        } else if(it.qty > 0){
-          estado = `Faltan ${cantidad-it.qty}`;
-          clase = 'warn';
-          faltantes++;
         } else {
-          estado = 'Agotado — hay que comprar todo';
-          clase = 'low';
-          faltantes++;
+          quedaria = it.qty - cantidad;
+          if(it.qty >= cantidad){
+            estado = 'Alcanza';
+            clase = 'ok';
+          } else if(it.qty > 0){
+            estado = `Faltan ${cantidad-it.qty}`;
+            clase = 'warn';
+            faltantes++;
+          } else {
+            estado = 'Agotado — hay que comprar todo';
+            clase = 'low';
+            faltantes++;
+          }
         }
+
+        let lineaQuedaria = '';
+        if(quedaria !== null){
+          if(quedaria >= 0){
+            const bajoMinimo = it.min && quedaria <= it.min*0.5;
+            lineaQuedaria = `<div style="font-size:11px;margin-top:2px;color:${bajoMinimo?'var(--amber)':'var(--text-dim)'};">↳ Si se entrega, quedarían <b>${quedaria}</b>${bajoMinimo?' (quedaría por acabarse)':''}</div>`;
+          } else {
+            lineaQuedaria = `<div style="font-size:11px;margin-top:2px;color:var(--red);">↳ Faltan <b>${Math.abs(quedaria)}</b> para completar el pedido — hay que comprar</div>`;
+          }
+        }
+
         html += `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px;">
-            <span>${escapeHtml(it.name)} <span style="color:var(--text-dim);font-size:11px;">(${escapeHtml(it.grupo)})</span></span>
-            <span style="text-align:right;">
-              <span class="badge ${clase}">${estado}</span>
-              <span style="color:var(--text-mut);font-size:11.5px;margin-left:6px;">${it.qty} disponibles</span>
-            </span>
+          <div style="padding:4px 0;font-size:13px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span>${escapeHtml(it.name)} <span style="color:var(--text-dim);font-size:11px;">(${escapeHtml(it.grupo)})</span></span>
+              <span style="text-align:right;">
+                <span class="badge ${clase}">${estado}</span>
+                <span style="color:var(--text-mut);font-size:11.5px;margin-left:6px;">${it.qty} disponibles</span>
+              </span>
+            </div>
+            ${lineaQuedaria}
           </div>
         `;
-        ultimoResultadoPedido.push({pedido:linea, cantidadPedida:cantidad||'', producto:it.name, bodega:it.grupo, disponible:it.qty, estado});
+        ultimoResultadoPedido.push({pedido:lineaOriginal, cantidadPedida:cantidadPedida||'', cantidadReal:cantidad||'', producto:it.name, bodega:it.grupo, disponible:it.qty, quedaria: quedaria===null?'':quedaria, estado});
       });
     }
     html += `</div>`;
@@ -3340,10 +3504,10 @@ document.getElementById('pedidoTexto').addEventListener('input', (e)=>{
 
 document.getElementById('pedidoDescargarBtn').addEventListener('click', async ()=>{
   if(!ultimoResultadoPedido.length){ setStatus('pedidoOcrStatus','Primero verifica un pedido.','err'); return; }
-  const filas = ultimoResultadoPedido.map(r=>[r.pedido, r.cantidadPedida, r.producto, r.bodega, String(r.disponible), r.estado]);
+  const filas = ultimoResultadoPedido.map(r=>[r.pedido, r.cantidadPedida, r.cantidadReal||'', r.producto, r.bodega, String(r.disponible), String(r.quedaria), r.estado]);
   await descargarExcelFormateado({
-    titulo: 'VERIFICACIÓN DE PEDIDO',
-    columnas: ['LÍNEA PEDIDA','CANTIDAD PEDIDA','PRODUCTO ENCONTRADO','BODEGA','DISPONIBLE','ESTADO'],
+    titulo: 'VERIFICACIÓN DE PEDIDO (simulación, no descuenta nada real)',
+    columnas: ['LÍNEA PEDIDA','CANTIDAD PEDIDA','CANTIDAD REAL (convertida)','PRODUCTO ENCONTRADO','BODEGA','DISPONIBLE','QUEDARÍA (simulado)','ESTADO'],
     filas
   });
   setStatus('pedidoOcrStatus', 'Excel descargado.', 'ok');
@@ -3465,6 +3629,7 @@ function switchTab(name){
   if(name==='troncal') resincronizarPestana('troncal');
   if(name==='graficos') renderGraficoBodegaSelect();
   if(name==='dashboard') cargarDashboard();
+  if(name==='pedidos') cargarReglasPedidos();
   window.scrollTo({top:0, behavior:'instant'});
 }
 document.querySelectorAll('.tab-btn').forEach(btn=>{
@@ -3480,6 +3645,7 @@ document.getElementById('adminGearBtn').addEventListener('click', async ()=>{
   renderUsuariosAdmin();
   renderComprasBodegaSelect();
   cargarBusquedasSinResultado();
+  cargarReglasPedidos();
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>{ p.style.display = (p.dataset.panel==='admin') ? '' : 'none'; });
   window.scrollTo({top:0, behavior:'instant'});
