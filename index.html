@@ -599,7 +599,28 @@
           <span>Destinatarios de la alerta</span>
           <button id="recipientsLockBtn" style="font-size:11px;padding:6px 11px;">🔒 Ocultar</button>
         </h2>
-        <p class="note">Cada destinatario elige a qué grupo de alertas está suscrito. La persona debe primero escribirle a tu bot y darte su chat_id. Para saber cómo sacar el chat_id, revisa las instrucciones que te di al principio (BotFather + getUpdates), o dime y te las repito.</p>
+        <p class="note">Cada destinatario elige a qué grupo de alertas está suscrito.</p>
+
+        <div style="margin-bottom:16px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel2);">
+          <h2 style="cursor:pointer;font-size:13px;margin-bottom:0;" id="guiaChatIdToggle">❓ ¿Cómo saco el chat_id de alguien? — guía paso a paso ▾</h2>
+          <div id="guiaChatIdBody" style="display:none;margin-top:12px;font-size:12.5px;color:var(--text-mut);line-height:1.7;">
+            <p style="margin:0 0 10px;"><b style="color:var(--text);">Paso 1 — La persona le escribe al bot.</b><br>
+            Dile que abra Telegram, busque el bot por su nombre de usuario (el mismo que le diste a BotFather al crearlo, ej: <code>@ControlMaterialesBot</code>), y le mande cualquier mensaje, como "hola". Esto es obligatorio: Telegram no deja que un bot le escriba primero a nadie, por privacidad.</p>
+
+            <p style="margin:0 0 10px;"><b style="color:var(--text);">Paso 2 — Tú abres esta página en tu navegador:</b><br>
+            <code style="word-break:break-all;">https://api.telegram.org/bot&lt;TU_TOKEN&gt;/getUpdates</code><br>
+            (cambia <code>&lt;TU_TOKEN&gt;</code> por el token real de tu bot, el que te dio BotFather).</p>
+
+            <p style="margin:0 0 10px;"><b style="color:var(--text);">Paso 3 — Copia y pega ese texto aquí abajo.</b><br>
+            En esa página, selecciona TODO el texto (Ctrl+A o Cmd+A), cópialo (Ctrl+C), y pégalo en el cuadro "🔍 ¿No sabes el chat_id?" un poco más abajo en esta misma sección. Dale "Analizar" y te va a mostrar a la persona por su nombre, con un botón "Usar este" que llena el Chat ID solo — ya no tienes que buscar el número a mano en el texto.</p>
+
+            <p style="margin:0 0 10px;"><b style="color:var(--text);">¿Y si prefieres buscarlo tú mismo, sin la herramienta?</b><br>
+            En ese mismo texto que copiaste, busca la parte que dice <code>"chat":{"id":XXXXXXX</code> — ese número (puede ser negativo si es un grupo) es el chat_id. Cópialo y pégalo directo en el campo "Chat ID nuevo".</p>
+
+            <p style="margin:0;"><b style="color:var(--text);">Si la página de getUpdates aparece vacía</b> (solo dice <code>{"ok":true,"result":[]}</code>), es porque esa persona todavía no le ha escrito nada al bot — repite el Paso 1 primero.</p>
+          </div>
+        </div>
+
         <div id="recipientsList" style="margin-bottom:12px;"></div>
         <div class="row">
           <div class="field">
@@ -769,27 +790,12 @@
       <div class="card">
         <h2>Gestionar usuarios</h2>
         <p class="note">
-          Cada persona inicia sesión con su propio usuario y clave (ya no hay una sola clave para todo, ni acceso sin iniciar sesión). "Admin" ve y edita todo.
-          Un usuario limitado solo ve y edita las bodegas que le marques aquí — ni siquiera puede ver las demás.
-          En "Bodegas permitidas" puedes escribir <code>*</code> para "todas las bodegas".
+          Cada persona inicia sesión con su propio usuario y clave (ya no hay una sola clave para todo, ni acceso sin iniciar sesión).
+          "Admin" ve y edita todo. Un usuario limitado solo ve y edita las bodegas que le marques con casillas — ni siquiera puede ver las
+          demás — y solo entra a las secciones (Buscar, Alertas/Reporte manual) que le actives aquí.
         </p>
-        <table>
-          <thead>
-            <tr>
-              <th>Usuario</th>
-              <th>Clave nueva</th>
-              <th>Admin</th>
-              <th>Bodegas permitidas</th>
-              <th>Crear bodegas</th>
-              <th>Solo comentar</th>
-              <th>Solo lectura</th>
-              <th>Cargar Excel</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="usuariosTbody"></tbody>
-        </table>
-        <p class="note" style="margin:8px 0 0;">Deja "Clave nueva" vacío al editar un usuario existente si no quieres cambiarle la clave.</p>
+        <div id="usuariosLista"></div>
+        <p class="note" style="margin:10px 0 0;">Deja "Clave nueva" vacío al editar un usuario existente si no quieres cambiarle la clave.</p>
         <div class="footer-actions">
           <button id="addUsuarioBtn">+ Agregar usuario</button>
         </div>
@@ -963,7 +969,7 @@ function mostrarModalLogin(){
         const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario, p_password: clave});
         if(error) throw error;
         if(!data){ setStatus('loginStatus','Usuario o clave incorrectos.','err'); ingresarBtn.disabled = false; return; }
-        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel};
+        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas};
         setSession(sesion);
         localStorage.setItem('ultimo-usuario', data.username);
         if(recordar) localStorage.setItem('sesion-recordada', JSON.stringify(sesion));
@@ -1329,7 +1335,8 @@ document.getElementById('registrarEntregaBtn').addEventListener('click', async (
   const item = items.find(it=>it.grupo===currentStockBodega && it.name===nombreProducto);
   if(!item){ setStatus('entregaStatus', 'No encontré ese producto en esta bodega.', 'err'); return; }
   if(cantidad > item.qty){
-    if(!confirm(`Solo hay ${item.qty} disponibles y estás entregando ${cantidad}. ¿Continuar de todos modos? (quedaría en 0)`)) return;
+    setStatus('entregaStatus', `No se puede entregar: solo hay ${item.qty} disponibles de "${nombreProducto}" y estás pidiendo entregar ${cantidad}.`, 'err');
+    return;
   }
 
   item.qty = Math.max(0, item.qty - cantidad);
@@ -1627,63 +1634,123 @@ document.getElementById('bulkAddBtn').addEventListener('click', async ()=>{
 let usuariosApp = [];
 
 async function renderUsuariosAdmin(){
-  const tbody = document.getElementById('usuariosTbody');
-  if(!tbody) return;
+  const box = document.getElementById('usuariosLista');
+  if(!box) return;
   const s = getSession();
-  if(!s || !s.esAdmin){ tbody.innerHTML = ''; return; }
+  if(!s || !s.esAdmin){ box.innerHTML = ''; return; }
 
   try{
     const {data, error} = await sb.rpc('listar_usuarios_admin', {p_username: s.username, p_password: s.password});
     if(error) throw error;
     usuariosApp = (data || []).map(u=>({...u, clave: ''}));
   }catch(e){
-    tbody.innerHTML = `<tr><td colspan="7"><span class="note" style="color:var(--red);">Error: ${escapeHtml(e.message)}</span></td></tr>`;
+    box.innerHTML = `<span class="note" style="color:var(--red);">Error: ${escapeHtml(e.message)}</span>`;
     return;
   }
   dibujarUsuariosAdmin();
 }
 
 function dibujarUsuariosAdmin(){
-  const tbody = document.getElementById('usuariosTbody');
-  tbody.innerHTML = '';
-  usuariosApp.forEach(u=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td data-label="Usuario"><input type="text" value="${escapeHtml(u.username)}" data-ufield="username" data-uid="${u.id}" style="width:100%;"></td>
-      <td data-label="Clave nueva"><input type="password" placeholder="(sin cambios)" data-ufield="clave" data-uid="${u.id}" style="width:100%;"></td>
-      <td data-label="Admin" style="text-align:center;"><input type="checkbox" data-ufield="esAdmin" data-uid="${u.id}" ${u.esAdmin?'checked':''}></td>
-      <td data-label="Bodegas permitidas"><input type="text" value="${escapeHtml((u.bodegasPermitidas||[]).join(', '))}" data-ufield="bodegasPermitidas" data-uid="${u.id}" placeholder="ej: Troncal, Corporativo" style="width:100%;" ${u.esAdmin?'disabled':''}></td>
-      <td data-label="Crear bodegas" style="text-align:center;"><input type="checkbox" data-ufield="puedeCrearBodegas" data-uid="${u.id}" ${u.puedeCrearBodegas?'checked':''}></td>
-      <td data-label="Solo comentar" style="text-align:center;"><input type="checkbox" data-ufield="soloComentario" data-uid="${u.id}" ${u.soloComentario?'checked':''} ${u.esAdmin?'disabled':''}></td>
-      <td data-label="Solo lectura" style="text-align:center;"><input type="checkbox" data-ufield="soloLectura" data-uid="${u.id}" ${u.soloLectura?'checked':''} ${u.esAdmin?'disabled':''}></td>
-      <td data-label="Cargar Excel" style="text-align:center;"><input type="checkbox" data-ufield="puedeCargarExcel" data-uid="${u.id}" ${u.puedeCargarExcel?'checked':''} ${u.esAdmin?'disabled':''}></td>
-      <td data-label="">
-        <button class="primary" data-guardar-usuario="${u.id}" style="font-size:11px;padding:6px 10px;">💾 Guardar</button>
-        ${u.esAdmin ? '' : `<button class="del" data-remove-usuario="${u.id}" title="Eliminar">✕</button>`}
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
+  const box = document.getElementById('usuariosLista');
+  box.innerHTML = usuariosApp.map(u=>{
+    const disabledSiAdmin = u.esAdmin ? 'disabled' : '';
+    const todasMarcado = (u.bodegasPermitidas||[]).includes('*');
+    const bodegasCheckboxes = bodegas.map(b=>`
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-mut);cursor:pointer;">
+        <input type="checkbox" class="u-bodega-chk" value="${escapeHtml(b.nombre)}" data-uid="${u.id}"
+          ${(u.bodegasPermitidas||[]).includes(b.nombre)?'checked':''} ${(u.esAdmin||todasMarcado)?'disabled':''}> ${escapeHtml(b.nombre)}
+      </label>
+    `).join('');
 
-  tbody.querySelectorAll('[data-ufield]').forEach(inp=>{
+    return `
+      <div style="border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px;">
+        <div class="row" style="margin-bottom:10px;">
+          <div class="field" style="max-width:160px;">
+            <label>Usuario</label>
+            <input type="text" value="${escapeHtml(u.username)}" data-ufield="username" data-uid="${u.id}">
+          </div>
+          <div class="field" style="max-width:160px;">
+            <label>Clave nueva</label>
+            <input type="password" placeholder="(sin cambios)" data-ufield="clave" data-uid="${u.id}">
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);cursor:pointer;padding-bottom:9px;">
+            <input type="checkbox" data-ufield="esAdmin" data-uid="${u.id}" ${u.esAdmin?'checked':''}> Administrador (acceso total)
+          </label>
+        </div>
+
+        <div style="${u.esAdmin?'opacity:0.4;':''}">
+          <label style="display:block;font-size:11.5px;color:var(--text-mut);margin-bottom:6px;">Bodegas permitidas</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);cursor:pointer;margin-bottom:6px;">
+            <input type="checkbox" class="u-todas-chk" data-uid="${u.id}" ${todasMarcado?'checked':''} ${disabledSiAdmin}> Todas las bodegas (incluidas las que cree después)
+          </label>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">${bodegasCheckboxes}</div>
+
+          <label style="display:block;font-size:11.5px;color:var(--text-mut);margin-bottom:6px;">Acceso a paneles y permisos</label>
+          <div style="display:flex;flex-wrap:wrap;gap:12px 18px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="accesoBuscar" data-uid="${u.id}" ${u.accesoBuscar?'checked':''} ${disabledSiAdmin}> 🔍 Pestaña Buscar
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="accesoAlertas" data-uid="${u.id}" ${u.accesoAlertas?'checked':''} ${disabledSiAdmin}> 🔔 Pestaña Alertas / enviar reporte manual
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="puedeCrearBodegas" data-uid="${u.id}" ${u.puedeCrearBodegas?'checked':''}> + Crear bodegas nuevas
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="soloComentario" data-uid="${u.id}" ${u.soloComentario?'checked':''} ${disabledSiAdmin}> 💬 Solo comentar (Observación)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="soloLectura" data-uid="${u.id}" ${u.soloLectura?'checked':''} ${disabledSiAdmin}> 👁️ Solo lectura (ve, no toca nada)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="puedeCargarExcel" data-uid="${u.id}" ${u.puedeCargarExcel?'checked':''} ${disabledSiAdmin}> 📄 Puede cargar Excel
+            </label>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <button class="primary" data-guardar-usuario="${u.id}" style="font-size:11px;padding:6px 10px;">💾 Guardar</button>
+          ${u.esAdmin ? '' : `<button class="del" data-remove-usuario="${u.id}" title="Eliminar">✕ Eliminar</button>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  box.querySelectorAll('[data-ufield]').forEach(inp=>{
     inp.addEventListener('change', (e)=>{
       const u = usuariosApp.find(x=>x.id===e.target.dataset.uid);
       if(!u) return;
       const field = e.target.dataset.ufield;
-      if(field==='esAdmin' || field==='puedeCrearBodegas' || field==='soloComentario' || field==='soloLectura' || field==='puedeCargarExcel'){
-        u[field] = e.target.checked;
-        if(field==='esAdmin') dibujarUsuariosAdmin(); // refresca para des/habilitar campos que no aplican a admins
-      } else if(field==='bodegasPermitidas'){
-        u.bodegasPermitidas = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
-      } else if(field==='clave'){
-        u.clave = e.target.value;
-      } else {
+      if(field==='clave' || field==='username'){
         u[field] = e.target.value;
+      } else {
+        u[field] = e.target.checked;
+        if(field==='esAdmin') dibujarUsuariosAdmin(); // refresca para des/habilitar lo que no aplica a admins
       }
     });
   });
 
-  tbody.querySelectorAll('[data-guardar-usuario]').forEach(btn=>{
+  box.querySelectorAll('.u-todas-chk').forEach(chk=>{
+    chk.addEventListener('change', (e)=>{
+      const u = usuariosApp.find(x=>x.id===e.target.dataset.uid);
+      if(!u) return;
+      u.bodegasPermitidas = e.target.checked ? ['*'] : [];
+      dibujarUsuariosAdmin(); // refresca para des/habilitar las casillas de bodegas puntuales
+    });
+  });
+
+  box.querySelectorAll('.u-bodega-chk').forEach(chk=>{
+    chk.addEventListener('change', (e)=>{
+      const u = usuariosApp.find(x=>x.id===e.target.dataset.uid);
+      if(!u) return;
+      const nombre = e.target.value;
+      const set = new Set(u.bodegasPermitidas||[]);
+      if(e.target.checked) set.add(nombre); else set.delete(nombre);
+      u.bodegasPermitidas = Array.from(set);
+    });
+  });
+
+  box.querySelectorAll('[data-guardar-usuario]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const u = usuariosApp.find(x=>x.id===btn.dataset.guardarUsuario);
       if(!u) return;
@@ -1696,7 +1763,8 @@ function dibujarUsuariosAdmin(){
           p_id: u.id || null, p_username: u.username.trim(), p_password: u.clave || null,
           p_es_admin: !!u.esAdmin, p_bodegas_permitidas: u.bodegasPermitidas||[],
           p_puede_crear_bodegas: !!u.puedeCrearBodegas, p_solo_comentario: !!u.soloComentario,
-          p_solo_lectura: !!u.soloLectura, p_puede_cargar_excel: !!u.puedeCargarExcel
+          p_solo_lectura: !!u.soloLectura, p_puede_cargar_excel: !!u.puedeCargarExcel,
+          p_acceso_buscar: !!u.accesoBuscar, p_acceso_alertas: !!u.accesoAlertas
         });
         if(error) throw error;
         setStatus('usuariosStatus', `Usuario "${u.username}" guardado.`, 'ok');
@@ -1707,7 +1775,7 @@ function dibujarUsuariosAdmin(){
     });
   });
 
-  tbody.querySelectorAll('[data-remove-usuario]').forEach(btn=>{
+  box.querySelectorAll('[data-remove-usuario]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const u = usuariosApp.find(x=>x.id===btn.dataset.removeUsuario);
       if(!u) return;
@@ -1726,7 +1794,7 @@ function dibujarUsuariosAdmin(){
 }
 
 document.getElementById('addUsuarioBtn').addEventListener('click', ()=>{
-  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false});
+  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false});
   dibujarUsuariosAdmin();
   setStatus('usuariosStatus', 'Escribe el usuario, ponle una clave, marca sus bodegas permitidas, y dale "💾 Guardar".', 'ok');
 });
@@ -2129,6 +2197,12 @@ document.getElementById('addRecipientBtn').addEventListener('click', async ()=>{
 });
 
 // ================== Ayuda para encontrar el chat_id ==================
+document.getElementById('guiaChatIdToggle').addEventListener('click', ()=>{
+  const body = document.getElementById('guiaChatIdBody');
+  const abierto = body.style.display !== 'none';
+  body.style.display = abierto ? 'none' : '';
+});
+
 document.getElementById('telegramHelperToggle').addEventListener('click', ()=>{
   const body = document.getElementById('telegramHelperBody');
   const abierto = body.style.display !== 'none';
@@ -2181,8 +2255,12 @@ function renderReporteManualBodegaSelect(){
   const sel = document.getElementById('reporteManualBodegaSelect');
   if(!sel) return;
   const actual = sel.value;
-  const visibles = bodegas.filter(b => b.tipo==='stock' && (!b.oculta || isAdmin()));
-  sel.innerHTML = '<option value="">Todas las bodegas</option>' +
+  const s = getSession();
+  let visibles = bodegas.filter(b => b.tipo==='stock' && (!b.oculta || isAdmin()));
+  if(s && !s.esAdmin){
+    visibles = visibles.filter(b => puedeVerBodega(b.nombre));
+  }
+  sel.innerHTML = (s && s.esAdmin ? '<option value="">Todas las bodegas</option>' : '') +
     visibles.map(b=>`<option value="${escapeHtml(b.nombre)}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}</option>`).join('');
   sel.value = actual || '';
 }
@@ -3026,21 +3104,22 @@ function bodegaTieneLado(nombre, lado){
 
 function actualizarNavegacionSegunSesion(){
   const s = getSession();
-  const esAmplio = !!(s && (s.esAdmin || (s.bodegasPermitidas||[]).includes('*')));
+  const esAmplio = !!(s && s.esAdmin);
   const permitidas = (s && s.bodegasPermitidas) || [];
 
   const puedeInventario = esAmplio || permitidas.some(n=>bodegaTieneLado(n,'inventario'));
   const puedeTroncal = esAmplio || permitidas.some(n=>bodegaTieneLado(n,'troncal'));
-  const puedeBuscarAlertas = esAmplio; // Buscar y Alertas cruzan todas las bodegas, solo para admin o "ve todo"
+  const puedeBuscar = esAmplio || !!(s && s.accesoBuscar);
+  const puedeAlertas = esAmplio || !!(s && s.accesoAlertas);
 
   const btnBuscar = document.querySelector('.tab-btn[data-tab="buscar"]');
   const btnInventario = document.querySelector('.tab-btn[data-tab="inventario"]');
   const btnTroncal = document.querySelector('.tab-btn[data-tab="troncal"]');
   const btnAlertas = document.querySelector('.tab-btn[data-tab="alertas"]');
-  if(btnBuscar) btnBuscar.style.display = puedeBuscarAlertas ? '' : 'none';
+  if(btnBuscar) btnBuscar.style.display = puedeBuscar ? '' : 'none';
   if(btnInventario) btnInventario.style.display = puedeInventario ? '' : 'none';
   if(btnTroncal) btnTroncal.style.display = puedeTroncal ? '' : 'none';
-  if(btnAlertas) btnAlertas.style.display = puedeBuscarAlertas ? '' : 'none';
+  if(btnAlertas) btnAlertas.style.display = puedeAlertas ? '' : 'none';
 
   // Si la pestaña que estaba activa quedó oculta para este usuario, se cambia
   // sola a la primera que sí pueda ver (para no dejarlo viendo una en blanco).
