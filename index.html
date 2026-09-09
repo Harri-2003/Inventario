@@ -151,9 +151,9 @@
       background:var(--panel);padding:16px 12px;overflow-y:auto;
       margin:0;z-index:30;
     }
-    .tab-btn{flex-direction:row;justify-content:flex-start;padding:10px 12px;font-size:13px;}
+    .tab-btn{flex:none;flex-direction:row;justify-content:flex-start;padding:10px 12px;font-size:13px;}
     .tab-btn svg{width:18px;height:18px;}
-    .tab-btn.active{border-left:2px solid var(--cyan);}
+    .tab-btn.active{background:var(--cyan-dim);color:var(--cyan);border-left:none;border-radius:var(--radius-sm);}
   }
 
   /* ---------- Cards ---------- */
@@ -369,6 +369,7 @@
       <h1>Control de Materiales</h1>
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
+      <span id="sessionUserLabel" style="font-size:11.5px;color:var(--text-mut);"></span>
       <div class="led-pill led-checking" id="connLed" title="Conectando…">
         <span class="dot"></span>
       </div>
@@ -377,6 +378,9 @@
       </button>
       <button class="gear-btn" id="adminGearBtn" title="Panel de administración">
         <span style="font-size:16px;line-height:1;">⚙️</span>
+      </button>
+      <button class="gear-btn" id="logoutBtn" title="Cerrar sesión" style="display:none;">
+        <span style="font-size:16px;line-height:1;">🚪</span>
       </button>
     </div>
   </header>
@@ -430,7 +434,7 @@
     </section>
 
     <div id="stockViewBlock" style="display:none;">
-      <div class="card">
+      <div class="card" id="uploadCardInv">
         <h2>Cargar inventario desde Excel</h2>
         <button id="plantillaInvBtn" style="margin-bottom:12px;">📋 Descargar plantilla</button>
         <div class="upload-zone" id="uploadZone">
@@ -782,8 +786,9 @@
       <div class="card">
         <h2>Gestionar usuarios</h2>
         <p class="note">
-          Cada persona inicia sesión con su propio usuario y clave (ya no hay una sola clave para todo). "Admin" ve y edita todo.
+          Cada persona inicia sesión con su propio usuario y clave (ya no hay una sola clave para todo, ni acceso sin iniciar sesión). "Admin" ve y edita todo.
           Un usuario limitado solo ve y edita las bodegas que le marques aquí — ni siquiera puede ver las demás.
+          En "Bodegas permitidas" puedes escribir <code>*</code> para "todas las bodegas".
         </p>
         <table>
           <thead>
@@ -794,6 +799,8 @@
               <th>Bodegas permitidas</th>
               <th>Crear bodegas</th>
               <th>Solo comentar</th>
+              <th>Solo lectura</th>
+              <th>Cargar Excel</th>
               <th></th>
             </tr>
           </thead>
@@ -893,16 +900,35 @@ function isAdmin(){
   const s = getSession();
   return !!(s && s.esAdmin);
 }
+// Un usuario limitado puede tener bodegas_permitidas = ['*'] (todas, como el
+// comodín que ya usábamos en destinatarios) o una lista puntual de nombres.
+function tieneAccesoABodega(s, nombreBodega){
+  const lista = (s && s.bodegasPermitidas) || [];
+  return lista.includes('*') || lista.includes(nombreBodega);
+}
+function puedeVerBodega(nombreBodega){
+  const s = getSession();
+  if(!s) return false;
+  if(s.esAdmin) return true;
+  return tieneAccesoABodega(s, nombreBodega);
+}
 function puedeEditarBodega(nombreBodega){
   const s = getSession();
   if(!s) return false;
   if(s.esAdmin) return true;
-  return (s.bodegasPermitidas||[]).includes(nombreBodega);
+  if(s.soloLectura || s.soloComentario) return false; // ninguno de los dos cuenta como "edición completa"
+  return tieneAccesoABodega(s, nombreBodega);
 }
 function puedeSoloComentar(nombreBodega){
   const s = getSession();
-  if(!s || s.esAdmin) return false;
-  return !!s.soloComentario && (s.bodegasPermitidas||[]).includes(nombreBodega);
+  if(!s || s.esAdmin || s.soloLectura) return false;
+  return !!s.soloComentario && tieneAccesoABodega(s, nombreBodega);
+}
+function puedeCargarExcelFn(nombreBodega){
+  const s = getSession();
+  if(!s) return false;
+  if(s.esAdmin) return true;
+  return !!s.puedeCargarExcel && tieneAccesoABodega(s, nombreBodega);
 }
 function puedeCrearBodegasFn(){
   const s = getSession();
@@ -954,7 +980,7 @@ function mostrarModalLogin(){
         const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario, p_password: clave});
         if(error) throw error;
         if(!data){ setStatus('loginStatus','Usuario o clave incorrectos.','err'); ingresarBtn.disabled = false; return; }
-        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario};
+        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel};
         setSession(sesion);
         localStorage.setItem('ultimo-usuario', data.username);
         if(recordar) localStorage.setItem('sesion-recordada', JSON.stringify(sesion));
@@ -990,7 +1016,9 @@ async function iniciarSesion(){
 // Para el panel admin completo (Gestionar bodegas, Categorías, Destinatarios, etc.)
 async function requireAdmin(){
   if(isAdmin()) return true;
+  if(getSession()){ alert('Tu usuario no tiene acceso al panel de administración completo.'); return false; }
   if(!(await iniciarSesion())) return false;
+  actualizarNavegacionSegunSesion();
   if(!isAdmin()){ alert('Tu usuario no tiene acceso al panel de administración completo.'); return false; }
   return true;
 }
@@ -998,7 +1026,9 @@ async function requireAdmin(){
 // Para el botón "Editar" de una bodega puntual (Inventario o Troncal)
 async function requireEditBodega(nombreBodega){
   if(puedeEditarBodega(nombreBodega) || puedeSoloComentar(nombreBodega)) return true;
+  if(getSession()){ alert('Tu usuario no tiene permiso para editar esta bodega.'); return false; }
   if(!(await iniciarSesion())) return false;
+  actualizarNavegacionSegunSesion();
   if(!puedeEditarBodega(nombreBodega) && !puedeSoloComentar(nombreBodega)){
     alert('Tu usuario no tiene permiso para editar esta bodega.');
     return false;
@@ -1181,6 +1211,7 @@ function render(){
 
   document.getElementById('invActions').style.display = editable ? '' : 'none';
   document.getElementById('invEditBtn').textContent = editable ? '✔ Guardar y cerrar' : '🔒 Editar';
+  document.getElementById('uploadCardInv').style.display = (editable || puedeCargarExcelFn(currentStockBodega)) ? '' : 'none';
 
   renderSummary();
   renderEntregaProductoOptions(); // mantiene el selector de "Registrar entrega" siempre al día
@@ -1339,7 +1370,6 @@ document.getElementById('registrarEntregaBtn').addEventListener('click', async (
 document.getElementById('invEditBtn').addEventListener('click', async ()=>{
   if(invEditing){
     invEditing = false;
-    clearSession(); // pide usuario y clave de nuevo la próxima vez
     render();
     renderEntregaCard();
     setStatus('uploadStatus','Cambios guardados. Edición cerrada.','ok');
@@ -1436,6 +1466,10 @@ uploadZone.addEventListener('drop', (e)=>{
 fileInput.addEventListener('change', (e)=>{ if(e.target.files.length) handleFile(e.target.files[0]); });
 
 function handleFile(file){
+  if(!(puedeEditarBodega(currentStockBodega) || puedeCargarExcelFn(currentStockBodega))){
+    setStatus('uploadStatus', 'Tu usuario no tiene permiso para cargar Excel en esta bodega.', 'err');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = async (e)=>{
     try{
@@ -1638,6 +1672,8 @@ function dibujarUsuariosAdmin(){
       <td data-label="Bodegas permitidas"><input type="text" value="${escapeHtml((u.bodegasPermitidas||[]).join(', '))}" data-ufield="bodegasPermitidas" data-uid="${u.id}" placeholder="ej: Troncal, Corporativo" style="width:100%;" ${u.esAdmin?'disabled':''}></td>
       <td data-label="Crear bodegas" style="text-align:center;"><input type="checkbox" data-ufield="puedeCrearBodegas" data-uid="${u.id}" ${u.puedeCrearBodegas?'checked':''}></td>
       <td data-label="Solo comentar" style="text-align:center;"><input type="checkbox" data-ufield="soloComentario" data-uid="${u.id}" ${u.soloComentario?'checked':''} ${u.esAdmin?'disabled':''}></td>
+      <td data-label="Solo lectura" style="text-align:center;"><input type="checkbox" data-ufield="soloLectura" data-uid="${u.id}" ${u.soloLectura?'checked':''} ${u.esAdmin?'disabled':''}></td>
+      <td data-label="Cargar Excel" style="text-align:center;"><input type="checkbox" data-ufield="puedeCargarExcel" data-uid="${u.id}" ${u.puedeCargarExcel?'checked':''} ${u.esAdmin?'disabled':''}></td>
       <td data-label="">
         <button class="primary" data-guardar-usuario="${u.id}" style="font-size:11px;padding:6px 10px;">💾 Guardar</button>
         ${u.esAdmin ? '' : `<button class="del" data-remove-usuario="${u.id}" title="Eliminar">✕</button>`}
@@ -1651,7 +1687,7 @@ function dibujarUsuariosAdmin(){
       const u = usuariosApp.find(x=>x.id===e.target.dataset.uid);
       if(!u) return;
       const field = e.target.dataset.ufield;
-      if(field==='esAdmin' || field==='puedeCrearBodegas' || field==='soloComentario'){
+      if(field==='esAdmin' || field==='puedeCrearBodegas' || field==='soloComentario' || field==='soloLectura' || field==='puedeCargarExcel'){
         u[field] = e.target.checked;
         if(field==='esAdmin') dibujarUsuariosAdmin(); // refresca para des/habilitar campos que no aplican a admins
       } else if(field==='bodegasPermitidas'){
@@ -1676,7 +1712,8 @@ function dibujarUsuariosAdmin(){
           p_admin_username: s.username, p_admin_password: s.password,
           p_id: u.id || null, p_username: u.username.trim(), p_password: u.clave || null,
           p_es_admin: !!u.esAdmin, p_bodegas_permitidas: u.bodegasPermitidas||[],
-          p_puede_crear_bodegas: !!u.puedeCrearBodegas, p_solo_comentario: !!u.soloComentario
+          p_puede_crear_bodegas: !!u.puedeCrearBodegas, p_solo_comentario: !!u.soloComentario,
+          p_solo_lectura: !!u.soloLectura, p_puede_cargar_excel: !!u.puedeCargarExcel
         });
         if(error) throw error;
         setStatus('usuariosStatus', `Usuario "${u.username}" guardado.`, 'ok');
@@ -1706,7 +1743,7 @@ function dibujarUsuariosAdmin(){
 }
 
 document.getElementById('addUsuarioBtn').addEventListener('click', ()=>{
-  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false});
+  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false});
   dibujarUsuariosAdmin();
   setStatus('usuariosStatus', 'Escribe el usuario, ponle una clave, marca sus bodegas permitidas, y dale "💾 Guardar".', 'ok');
 });
@@ -1861,7 +1898,6 @@ document.getElementById('recipientsUnlockBtn').addEventListener('click', async (
 });
 
 document.getElementById('recipientsLockBtn').addEventListener('click', ()=>{
-  clearSession();
   updateRecipientsVisibility(false);
 });
 
@@ -1986,10 +2022,10 @@ function resincronizarPestana(lado){
 // bodegas que tiene permitidas — nada más, ni para mirar. Sin sesión, o con
 // sesión de admin, se ven todas las que no estén ocultas (comportamiento normal).
 function bodegasVisiblesPara(lado){
-  const s = getSession();
   let lista = bodegas.filter(b => b.lado===lado && (!b.oculta || isAdmin()));
+  const s = getSession();
   if(s && !s.esAdmin){
-    lista = lista.filter(b => (s.bodegasPermitidas||[]).includes(b.nombre));
+    lista = lista.filter(b => puedeVerBodega(b.nombre));
   }
   return lista;
 }
@@ -2308,7 +2344,7 @@ function renderTroncal(){
   // Agregar/cargar por Excel/vaciar fechas: solo con edición completa (no en modo "solo comentar")
   document.getElementById('troncalActions').style.display = fullEdit ? '' : 'none';
   document.getElementById('troncalBulkCard').style.display = fullEdit ? '' : 'none';
-  document.getElementById('troncalExcelCard').style.display = fullEdit ? '' : 'none';
+  document.getElementById('troncalExcelCard').style.display = (fullEdit || puedeCargarExcelFn(currentLogBodega)) ? '' : 'none';
   document.getElementById('troncalEditBtn').textContent = (fullEdit || soloComentar) ? '✔ Guardar y cerrar' : '🔒 Editar';
 }
 
@@ -2350,7 +2386,6 @@ document.getElementById('tipoMaterialSwitch').addEventListener('click', (e)=>{
 document.getElementById('troncalEditBtn').addEventListener('click', async ()=>{
   if(troncalEditing){
     troncalEditing = false;
-    clearSession(); // pide usuario y clave de nuevo la próxima vez
     renderTroncal();
     setStatus('troncalAlertStatus','Cambios guardados. Edición cerrada.','ok');
     return;
@@ -2688,11 +2723,10 @@ document.getElementById('dispoDescargarBtn').addEventListener('click', async ()=
 
 // ================== Navegación por pestañas + panel admin oculto ==================
 function switchTab(name){
-  // si estábamos en el panel admin y nos vamos a otra pestaña, cerramos la sesión de admin
+  // si estábamos en el panel admin y nos vamos a otra pestaña, salimos del modo edición (sin cerrar la sesión)
   const adminPanel = document.querySelector('.tab-panel[data-panel="admin"]');
   const veniamosDelAdmin = adminPanel.style.display !== 'none';
   if(veniamosDelAdmin && name !== 'admin'){
-    clearSession();
     invEditing = false;
     troncalEditing = false;
     render();
@@ -2816,6 +2850,10 @@ troncalFileInput.addEventListener('change', (e)=>{
 });
 
 function handleTroncalFile(file){
+  if(!(puedeEditarBodega(currentLogBodega) || puedeCargarExcelFn(currentLogBodega))){
+    setStatus('troncalUploadStatus', 'Tu usuario no tiene permiso para cargar Excel en esta bodega.', 'err');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = async (e)=>{
     try{
@@ -2949,8 +2987,61 @@ document.getElementById('exportTroncalBtn').addEventListener('click', async ()=>
   setStatus('troncalAlertStatus', 'Excel descargado.', 'ok');
 });
 
-loadAll();
-subscribeRealtime();
+// ================== Navegación filtrada por rol ==================
+function bodegaTieneLado(nombre, lado){
+  const b = bodegas.find(x=>x.nombre===nombre);
+  return b && b.lado===lado;
+}
+
+function actualizarNavegacionSegunSesion(){
+  const s = getSession();
+  const esAmplio = !!(s && (s.esAdmin || (s.bodegasPermitidas||[]).includes('*')));
+  const permitidas = (s && s.bodegasPermitidas) || [];
+
+  const puedeInventario = esAmplio || permitidas.some(n=>bodegaTieneLado(n,'inventario'));
+  const puedeTroncal = esAmplio || permitidas.some(n=>bodegaTieneLado(n,'troncal'));
+  const puedeBuscarAlertas = esAmplio; // Buscar y Alertas cruzan todas las bodegas, solo para admin o "ve todo"
+
+  const btnBuscar = document.querySelector('.tab-btn[data-tab="buscar"]');
+  const btnInventario = document.querySelector('.tab-btn[data-tab="inventario"]');
+  const btnTroncal = document.querySelector('.tab-btn[data-tab="troncal"]');
+  const btnAlertas = document.querySelector('.tab-btn[data-tab="alertas"]');
+  if(btnBuscar) btnBuscar.style.display = puedeBuscarAlertas ? '' : 'none';
+  if(btnInventario) btnInventario.style.display = puedeInventario ? '' : 'none';
+  if(btnTroncal) btnTroncal.style.display = puedeTroncal ? '' : 'none';
+  if(btnAlertas) btnAlertas.style.display = puedeBuscarAlertas ? '' : 'none';
+
+  // Si la pestaña que estaba activa quedó oculta para este usuario, se cambia
+  // sola a la primera que sí pueda ver (para no dejarlo viendo una en blanco).
+  const activa = document.querySelector('.tab-btn.active');
+  if(!activa || activa.style.display === 'none'){
+    const primeraVisible = Array.from(document.querySelectorAll('.tab-btn')).find(b=>b.style.display !== 'none');
+    if(primeraVisible) switchTab(primeraVisible.dataset.tab);
+  }
+
+  // El botón de cerrar sesión solo tiene sentido si hay alguien conectado
+  const logoutBtn = document.getElementById('logoutBtn');
+  if(logoutBtn) logoutBtn.style.display = s ? '' : 'none';
+  const userLabel = document.getElementById('sessionUserLabel');
+  if(userLabel) userLabel.textContent = s ? s.username : '';
+}
+
+document.getElementById('logoutBtn').addEventListener('click', ()=>{
+  if(!confirm('¿Cerrar sesión? Vas a tener que volver a iniciar sesión para usar la app.')) return;
+  clearSession();
+  location.reload();
+});
+
+// ================== Arranque: pide iniciar sesión antes de mostrar nada ==================
+async function iniciarApp(){
+  while(!getSession()){
+    await mostrarModalLogin();
+  }
+  await loadAll();
+  actualizarNavegacionSegunSesion();
+  subscribeRealtime();
+}
+iniciarApp();
 
 </script>
 </body>
