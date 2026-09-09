@@ -140,6 +140,14 @@
   /* ---------- Barra lateral en PC (pantallas anchas) ----------
      El celular no se toca: esta regla solo aplica desde 900px de ancho
      en adelante, así que en móvil sigue viéndose igual que siempre. */
+  /* ---------- Interruptor deslizante ---------- */
+  .toggle-switch{position:relative;display:inline-block;width:38px;height:21px;flex:none;}
+  .toggle-switch input{opacity:0;width:0;height:0;}
+  .toggle-slider{position:absolute;inset:0;background:var(--panel3);border:1px solid var(--line);border-radius:999px;cursor:pointer;transition:background .15s;}
+  .toggle-slider::before{content:"";position:absolute;width:15px;height:15px;left:2px;top:2px;background:var(--text-dim);border-radius:50%;transition:transform .15s, background .15s;}
+  .toggle-switch input:checked + .toggle-slider{background:var(--cyan-dim);border-color:var(--cyan);}
+  .toggle-switch input:checked + .toggle-slider::before{transform:translateX(17px);background:var(--cyan);}
+
   /* ---------- Cards ---------- */
   .card{
     background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
@@ -386,22 +394,37 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-4 4"/></svg>
       <span class="tab-label">Gráficos</span>
     </button>
+    <button class="tab-btn" data-tab="pedidos">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <span class="tab-label">Pedidos</span>
+    </button>
   </nav>
 
   <main>
 
     <section class="tab-panel" data-panel="dashboard">
       <div class="card">
-        <h2>Resumen general</h2>
-        <p class="note">Un vistazo rápido de todas las bodegas que puedes ver, antes de entrar a trabajar en una en concreto.</p>
-        <div id="dashboardResumenNumeros" class="summary" style="margin:0 0 18px;"></div>
-        <div id="dashboardBodegasCriticas" style="margin-bottom:18px;"></div>
+        <h2 style="justify-content:space-between;">
+          <span>Resumen general</span>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:400;color:var(--text-mut);cursor:pointer;">
+            Mostrar
+            <span class="toggle-switch">
+              <input type="checkbox" id="dashboardToggle">
+              <span class="toggle-slider"></span>
+            </span>
+          </label>
+        </h2>
+        <p class="note">Un vistazo rápido de todas las bodegas que puedes ver — oculto por defecto cada vez que entras, actívalo con el interruptor.</p>
+        <div id="dashboardContenido" style="display:none;">
+          <div id="dashboardResumenNumeros" class="summary" style="margin:0 0 18px;"></div>
+          <div id="dashboardBodegasCriticas" style="margin-bottom:6px;"></div>
+        </div>
       </div>
-      <div class="card">
+      <div class="card" id="dashboardCardEntregas" style="display:none;">
         <h2>Últimas entregas registradas</h2>
         <div id="dashboardEntregas"></div>
       </div>
-      <div class="card">
+      <div class="card" id="dashboardCardHistorial" style="display:none;">
         <h2>Últimos cambios</h2>
         <div id="dashboardHistorial"></div>
       </div>
@@ -740,6 +763,25 @@
       </div>
     </section>
 
+    <section class="tab-panel" data-panel="pedidos" style="display:none">
+      <div class="card">
+        <h2>Verificar pedido</h2>
+        <p class="note">
+          Pega un pedido con cantidades, uno por línea (ej: "100 Tensores Metálicos"), o pega/sube una foto del mensaje.
+          Te dice si tienes lo suficiente de cada cosa, cuánto hay, y qué falta. Sección privada, solo para quien tenga este permiso.
+        </p>
+        <textarea id="pedidoTexto" style="min-height:180px;" placeholder="3 Carretos de fibra drop 1 hilo&#10;100 Tensores metálicos&#10;10 Ont Tp Link&#10;30 Stickers&#10;50 Rosetas"></textarea>
+        <div class="row" style="margin-top:10px;">
+          <button id="pedidoImagenBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m21 15-5-5L6 21"/></svg> Pegar/subir imagen</button>
+          <button class="primary" id="verificarPedidoBtn">Verificar pedido</button>
+          <button id="pedidoDescargarBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg> Descargar resultados</button>
+        </div>
+        <input type="file" id="pedidoImagenInput" class="hidden-input" accept="image/*">
+        <div class="status" id="pedidoOcrStatus"></div>
+        <div id="pedidoResultados" style="margin-top:16px;"></div>
+      </div>
+    </section>
+
     <!-- Panel oculto: no tiene botón en la barra de pestañas, solo se abre con el ícono de engranaje + clave -->
     <section class="tab-panel" data-panel="admin" style="display:none">
       <button class="admin-back" id="adminBackBtn">
@@ -1072,7 +1114,7 @@ function mostrarModalLogin(){
         const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario, p_password: clave});
         if(error) throw error;
         if(!data){ setStatus('loginStatus','Usuario o clave incorrectos.','err'); ingresarBtn.disabled = false; return; }
-        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas, accesoGraficos:data.accesoGraficos};
+        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas, accesoGraficos:data.accesoGraficos, accesoPedidos:data.accesoPedidos, accesoResumen:data.accesoResumen};
         setSession(sesion);
         localStorage.setItem('ultimo-usuario', data.username);
         if(recordar) localStorage.setItem('sesion-recordada', JSON.stringify(sesion));
@@ -1372,7 +1414,26 @@ document.getElementById('notaInvBtn').addEventListener('click', ()=>agregarNota(
 document.getElementById('notaTroncalBtn').addEventListener('click', ()=>agregarNota(currentLogBodega, 'notaTroncalTexto', 'notaTroncalStatus', 'notaTroncalLista'));
 
 // ================== Dashboard / resumen general ==================
-async function cargarDashboard(){
+// Cada vez que se entra a esta pestaña, el interruptor arranca APAGADO
+// (oculto) — hay que activarlo a propósito para ver los números, y ahí
+// recién se consultan los datos (no se cargan de una vez, por discreción).
+function cargarDashboard(){
+  const toggle = document.getElementById('dashboardToggle');
+  toggle.checked = false;
+  document.getElementById('dashboardContenido').style.display = 'none';
+  document.getElementById('dashboardCardEntregas').style.display = 'none';
+  document.getElementById('dashboardCardHistorial').style.display = 'none';
+}
+
+document.getElementById('dashboardToggle').addEventListener('change', (e)=>{
+  const visible = e.target.checked;
+  document.getElementById('dashboardContenido').style.display = visible ? '' : 'none';
+  document.getElementById('dashboardCardEntregas').style.display = visible ? '' : 'none';
+  document.getElementById('dashboardCardHistorial').style.display = visible ? '' : 'none';
+  if(visible) cargarDatosDashboard();
+});
+
+async function cargarDatosDashboard(){
   const bodegasVisibles = bodegas.filter(b=>b.tipo==='stock' && puedeVerBodega(b.nombre)).map(b=>b.nombre);
   const itemsVisibles = items.filter(it=>bodegasVisibles.includes(it.grupo));
 
@@ -1585,7 +1646,7 @@ function render(){
   }
 
   document.getElementById('invActions').style.display = editable ? '' : 'none';
-  document.getElementById('invEditBtn').textContent = editable ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M20 6 9 17l-5-5"/></svg> Guardar y cerrar' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"/></svg> Editar';
+  document.getElementById('invEditBtn').innerHTML = editable ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M20 6 9 17l-5-5"/></svg> Guardar y cerrar' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"/></svg> Editar';
   document.getElementById('uploadCardInv').style.display = (editable || puedeCargarExcelFn(currentStockBodega)) ? '' : 'none';
 
   renderSummary();
@@ -2083,6 +2144,12 @@ function dibujarUsuariosAdmin(){
               <input type="checkbox" data-ufield="accesoGraficos" data-uid="${u.id}" ${u.accesoGraficos?'checked':''} ${disabledSiAdmin}> <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-4 4"/></svg> Pestaña Gráficos
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="accesoPedidos" data-uid="${u.id}" ${u.accesoPedidos?'checked':''} ${disabledSiAdmin}> <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Pestaña Pedidos (privada)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="accesoResumen" data-uid="${u.id}" ${u.accesoResumen?'checked':''} ${disabledSiAdmin}> <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg> Pestaña Resumen (privada)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
               <input type="checkbox" data-ufield="puedeCrearBodegas" data-uid="${u.id}" ${u.puedeCrearBodegas?'checked':''}> + Crear bodegas nuevas
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
@@ -2153,7 +2220,8 @@ function dibujarUsuariosAdmin(){
           p_es_admin: !!u.esAdmin, p_bodegas_permitidas: u.bodegasPermitidas||[],
           p_puede_crear_bodegas: !!u.puedeCrearBodegas, p_solo_comentario: !!u.soloComentario,
           p_solo_lectura: !!u.soloLectura, p_puede_cargar_excel: !!u.puedeCargarExcel,
-          p_acceso_buscar: !!u.accesoBuscar, p_acceso_alertas: !!u.accesoAlertas, p_acceso_graficos: !!u.accesoGraficos
+          p_acceso_buscar: !!u.accesoBuscar, p_acceso_alertas: !!u.accesoAlertas, p_acceso_graficos: !!u.accesoGraficos,
+          p_acceso_pedidos: !!u.accesoPedidos, p_acceso_resumen: !!u.accesoResumen
         });
         if(error) throw error;
         setStatus('usuariosStatus', `Usuario "${u.username}" guardado.`, 'ok');
@@ -2183,7 +2251,7 @@ function dibujarUsuariosAdmin(){
 }
 
 document.getElementById('addUsuarioBtn').addEventListener('click', ()=>{
-  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false, accesoGraficos:false});
+  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false, accesoGraficos:false, accesoPedidos:false, accesoResumen:false});
   dibujarUsuariosAdmin();
   setStatus('usuariosStatus', 'Escribe el usuario, ponle una clave, marca sus bodegas permitidas, y dale "<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h6"/></svg> Guardar".', 'ok');
 });
@@ -2798,7 +2866,7 @@ function renderTroncal(){
   document.getElementById('troncalActions').style.display = fullEdit ? '' : 'none';
   document.getElementById('troncalBulkCard').style.display = fullEdit ? '' : 'none';
   document.getElementById('troncalExcelCard').style.display = (fullEdit || puedeCargarExcelFn(currentLogBodega)) ? '' : 'none';
-  document.getElementById('troncalEditBtn').textContent = (fullEdit || soloComentar) ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M20 6 9 17l-5-5"/></svg> Guardar y cerrar' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"/></svg> Editar';
+  document.getElementById('troncalEditBtn').innerHTML = (fullEdit || soloComentar) ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M20 6 9 17l-5-5"/></svg> Guardar y cerrar' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"/></svg> Editar';
 }
 
 async function saveTroncal(en){
@@ -3146,6 +3214,140 @@ function buscarLineaEnLista(palabras, lista){
   const minRequerido = Math.max(2, Math.ceil(palabras.length*0.6));
   return scored.filter(r=>r.coincidencias>=minRequerido).sort((a,b)=>b.coincidencias-a.coincidencias);
 }
+
+// ================== Verificar pedido (cantidades contra el stock real) ==================
+let ultimoResultadoPedido = [];
+
+// Separa "100 Tensores Metálicos" en {cantidad: 100, texto: "Tensores Metálicos"}.
+// Si la línea no empieza con número, se trata como cantidad desconocida (solo busca, no compara).
+function separarCantidadYTexto(linea){
+  const m = linea.trim().match(/^(\d+)\s*[xX]?\s+(.+)$/);
+  if(m) return {cantidad: parseInt(m[1]), texto: m[2]};
+  return {cantidad: null, texto: linea.trim()};
+}
+
+document.getElementById('verificarPedidoBtn').addEventListener('click', async ()=>{
+  const textoCompleto = document.getElementById('pedidoTexto').value.trim();
+  if(!textoCompleto){ setStatus('pedidoOcrStatus','Pega el pedido primero.','err'); return; }
+
+  const lineas = textoCompleto.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!lineas.length){ setStatus('pedidoOcrStatus','No encontré líneas para revisar.','err'); return; }
+
+  let todosStock = [];
+  try{
+    const {data, error} = await sb.from('productos').select('*');
+    if(error) throw error;
+    todosStock = (data||[]).map(r=>({name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+  }catch(e){
+    setStatus('pedidoOcrStatus','No se pudo consultar el inventario: ' + e.message, 'err');
+    return;
+  }
+
+  ultimoResultadoPedido = [];
+  const box = document.getElementById('pedidoResultados');
+  let html = '';
+  let faltantes = 0;
+
+  lineas.forEach(linea=>{
+    const {cantidad, texto} = separarCantidadYTexto(linea);
+    const palabras = palabrasClave(texto);
+    const resultados = palabras.length ? buscarLineaEnLista(palabras, todosStock) : [];
+
+    html += `<div style="padding:10px 0;border-bottom:1px solid var(--line-soft);">`;
+    html += `<p style="margin:0 0 6px;font-weight:700;">${cantidad!==null ? `${cantidad} × ` : ''}${escapeHtml(texto)}</p>`;
+
+    if(!resultados.length){
+      html += `<p class="note" style="margin:0;color:var(--red);">No lo encontré en el sistema.</p>`;
+      ultimoResultadoPedido.push({pedido:linea, cantidadPedida:cantidad||'', producto:'', bodega:'', disponible:'', estado:'NO ENCONTRADO'});
+      faltantes++;
+    } else {
+      resultados.slice(0,5).forEach(({it})=>{
+        let estado, clase;
+        if(cantidad===null){
+          estado = it.qty>0 ? 'Disponible' : 'Agotado';
+          clase = it.qty>0 ? 'ok' : 'low';
+        } else if(it.qty >= cantidad){
+          estado = 'Alcanza';
+          clase = 'ok';
+        } else if(it.qty > 0){
+          estado = `Faltan ${cantidad-it.qty}`;
+          clase = 'warn';
+          faltantes++;
+        } else {
+          estado = 'Agotado — hay que comprar todo';
+          clase = 'low';
+          faltantes++;
+        }
+        html += `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px;">
+            <span>${escapeHtml(it.name)} <span style="color:var(--text-dim);font-size:11px;">(${escapeHtml(it.grupo)})</span></span>
+            <span style="text-align:right;">
+              <span class="badge ${clase}">${estado}</span>
+              <span style="color:var(--text-mut);font-size:11.5px;margin-left:6px;">${it.qty} disponibles</span>
+            </span>
+          </div>
+        `;
+        ultimoResultadoPedido.push({pedido:linea, cantidadPedida:cantidad||'', producto:it.name, bodega:it.grupo, disponible:it.qty, estado});
+      });
+    }
+    html += `</div>`;
+  });
+
+  box.innerHTML = html;
+  setStatus('pedidoOcrStatus', faltantes ? `${faltantes} línea(s) con problemas (faltante o no encontrado).` : 'Todo el pedido se puede cubrir con el stock actual.', faltantes ? 'err' : 'ok');
+});
+
+document.getElementById('pedidoImagenBtn').addEventListener('click', ()=>document.getElementById('pedidoImagenInput').click());
+document.getElementById('pedidoImagenInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  setStatus('pedidoOcrStatus', 'Preparando lector de imágenes (solo la primera vez)…', '');
+  try{
+    await asegurarTesseract();
+    setStatus('pedidoOcrStatus', 'Leyendo texto de la imagen…', '');
+    const { data: { text } } = await Tesseract.recognize(file, 'spa');
+    const actual = document.getElementById('pedidoTexto').value.trim();
+    document.getElementById('pedidoTexto').value = actual ? actual + '\n' + text : text;
+    setStatus('pedidoOcrStatus', 'Texto extraído. Revísalo y dale "Verificar pedido".', 'ok');
+  }catch(err){
+    setStatus('pedidoOcrStatus', 'No se pudo leer el texto de esa imagen.', 'err');
+  }
+});
+document.getElementById('pedidoTexto').addEventListener('paste', async (e)=>{
+  const itemsPeg = Array.from(e.clipboardData.items || []);
+  const img = itemsPeg.find(it=>it.type.startsWith('image/'));
+  if(!img) return;
+  e.preventDefault();
+  const file = img.getAsFile();
+  setStatus('pedidoOcrStatus', 'Leyendo texto de la imagen pegada…', '');
+  try{
+    await asegurarTesseract();
+    const { data: { text } } = await Tesseract.recognize(file, 'spa');
+    const actual = document.getElementById('pedidoTexto').value.trim();
+    document.getElementById('pedidoTexto').value = actual ? actual + '\n' + text : text;
+    setStatus('pedidoOcrStatus', 'Texto extraído. Revísalo y dale "Verificar pedido".', 'ok');
+  }catch(err){
+    setStatus('pedidoOcrStatus', 'No se pudo leer el texto de esa imagen.', 'err');
+  }
+});
+document.getElementById('pedidoTexto').addEventListener('input', (e)=>{
+  if(!e.target.value.trim()){
+    document.getElementById('pedidoResultados').innerHTML = '';
+    ultimoResultadoPedido = [];
+    setStatus('pedidoOcrStatus', '', '');
+  }
+});
+
+document.getElementById('pedidoDescargarBtn').addEventListener('click', async ()=>{
+  if(!ultimoResultadoPedido.length){ setStatus('pedidoOcrStatus','Primero verifica un pedido.','err'); return; }
+  const filas = ultimoResultadoPedido.map(r=>[r.pedido, r.cantidadPedida, r.producto, r.bodega, String(r.disponible), r.estado]);
+  await descargarExcelFormateado({
+    titulo: 'VERIFICACIÓN DE PEDIDO',
+    columnas: ['LÍNEA PEDIDA','CANTIDAD PEDIDA','PRODUCTO ENCONTRADO','BODEGA','DISPONIBLE','ESTADO'],
+    filas
+  });
+  setStatus('pedidoOcrStatus', 'Excel descargado.', 'ok');
+});
 
 document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
   const textoCompleto = document.getElementById('dispoTexto').value.trim();
@@ -3675,17 +3877,23 @@ function actualizarNavegacionSegunSesion(){
   const puedeBuscar = esAmplio || !!(s && s.accesoBuscar);
   const puedeAlertas = esAmplio || !!(s && s.accesoAlertas);
   const puedeGraficos = esAmplio || !!(s && s.accesoGraficos);
+  const puedePedidos = esAmplio || !!(s && s.accesoPedidos);
+  const puedeResumen = esAmplio || !!(s && s.accesoResumen);
 
   const btnBuscar = document.querySelector('.tab-btn[data-tab="buscar"]');
   const btnInventario = document.querySelector('.tab-btn[data-tab="inventario"]');
   const btnTroncal = document.querySelector('.tab-btn[data-tab="troncal"]');
   const btnAlertas = document.querySelector('.tab-btn[data-tab="alertas"]');
   const btnGraficos = document.querySelector('.tab-btn[data-tab="graficos"]');
+  const btnPedidos = document.querySelector('.tab-btn[data-tab="pedidos"]');
+  const btnDashboard = document.querySelector('.tab-btn[data-tab="dashboard"]');
   if(btnBuscar) btnBuscar.style.display = puedeBuscar ? '' : 'none';
   if(btnInventario) btnInventario.style.display = puedeInventario ? '' : 'none';
   if(btnTroncal) btnTroncal.style.display = puedeTroncal ? '' : 'none';
   if(btnAlertas) btnAlertas.style.display = puedeAlertas ? '' : 'none';
   if(btnGraficos) btnGraficos.style.display = puedeGraficos ? '' : 'none';
+  if(btnPedidos) btnPedidos.style.display = puedePedidos ? '' : 'none';
+  if(btnDashboard) btnDashboard.style.display = puedeResumen ? '' : 'none';
 
   // Si la pestaña que estaba activa quedó oculta para este usuario, se cambia
   // sola a la primera que sí pueda ver (para no dejarlo viendo una en blanco).
