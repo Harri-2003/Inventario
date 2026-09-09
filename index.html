@@ -2593,20 +2593,68 @@ function palabrasClave(texto){
 
 let ultimoResultadoDispo = [];
 
+// Palabras tan comunes y cortas que NUNCA deben contar como coincidencia por
+// sí solas (evita que "de" calce por accidente dentro de "verde", por ejemplo).
+const STOPWORDS_PRODUCTO = new Set(['de','la','el','los','las','un','una','y','o','del','al','en','con','para']);
+
 function coincideConProducto(palabraBusqueda, palabrasProducto){
-  // "amarras" (búsqueda, plural) sí debe calzar con "amarra" (producto, singular) y viceversa
-  return palabrasProducto.some(pw => pw.includes(palabraBusqueda) || palabraBusqueda.includes(pw));
+  return palabrasProducto.some(pw=>{
+    if(STOPWORDS_PRODUCTO.has(pw)) return false;
+    if(pw.includes(palabraBusqueda)) return true;
+    // "amarras" (búsqueda, plural) sí debe calzar con "amarra" (producto, singular).
+    // El mínimo de 4 letras evita que fragmentos cortos como "de" calcen por
+    // accidente dentro de una palabra de búsqueda más larga (ej. "verde").
+    if(pw.length>=4 && palabraBusqueda.includes(pw)) return true;
+    return false;
+  });
+}
+
+// Cuenta cuántas letras hay que cambiar/agregar/quitar para convertir una
+// palabra en otra (distancia de edición). Sirve para tolerar errores de
+// tipeo u OCR en cualquier parte de la palabra, no solo al principio o final.
+function distanciaEdicion(a, b){
+  const filas = a.length+1, cols = b.length+1;
+  const dp = Array.from({length:filas}, ()=>new Array(cols).fill(0));
+  for(let i=0;i<filas;i++) dp[i][0] = i;
+  for(let j=0;j<cols;j++) dp[0][j] = j;
+  for(let i=1;i<filas;i++){
+    for(let j=1;j<cols;j++){
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  return dp[a.length][b.length];
 }
 
 function buscarLineaEnLista(palabras, lista){
   const scored = lista.map(it=>{
     const palabrasProducto = normalizeName(it.name).split(/\s+/).filter(Boolean);
     const coincidencias = palabras.filter(p=>coincideConProducto(p, palabrasProducto)).length;
-    return {it, coincidencias};
+    return {it, coincidencias, palabrasProducto};
   });
   const conTodas = scored.filter(r=>r.coincidencias===palabras.length);
   if(conTodas.length) return conTodas.sort((a,b)=>a.it.name.localeCompare(b.it.name));
-  if(palabras.length===1) return [];
+
+  if(palabras.length===1){
+    const palabra = palabras[0];
+    const minPrefijo = Math.min(4, palabra.length);
+    if(minPrefijo < 3) return []; // palabra muy corta y sin match exacto -> mejor no arriesgar
+
+    // Respaldo 1: comparten el prefijo (mismas primeras letras)
+    const conPrefijo = scored.filter(r=>r.palabrasProducto.some(pw=>
+      !STOPWORDS_PRODUCTO.has(pw) && pw.length>=minPrefijo && pw.slice(0,minPrefijo)===palabra.slice(0,minPrefijo)
+    ));
+    if(conPrefijo.length) return conPrefijo.sort((a,b)=>a.it.name.localeCompare(b.it.name));
+
+    // Respaldo 2: se parecen mucho (typo/OCR en cualquier parte de la palabra),
+    // tolerando 1 letra de diferencia en palabras cortas, 2 en palabras largas.
+    const tolerancia = palabra.length <= 5 ? 1 : 2;
+    const conParecido = scored.filter(r=>r.palabrasProducto.some(pw=>
+      !STOPWORDS_PRODUCTO.has(pw) && pw.length>=4 &&
+      Math.abs(pw.length-palabra.length)<=tolerancia && distanciaEdicion(pw,palabra)<=tolerancia
+    ));
+    return conParecido.sort((a,b)=>a.it.name.localeCompare(b.it.name));
+  }
+
   const minRequerido = Math.max(2, Math.ceil(palabras.length*0.6));
   return scored.filter(r=>r.coincidencias>=minRequerido).sort((a,b)=>b.coincidencias-a.coincidencias);
 }
