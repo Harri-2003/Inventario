@@ -685,9 +685,15 @@
 
       <div class="card">
         <h2>Alerta programada</h2>
-        <p class="note">Envía el reporte completo automáticamente un día y hora específicos, sin que nadie abra nada.</p>
+        <p class="note">Envía el reporte completo automáticamente un día y hora específicos, sin que nadie abra nada. Puedes apuntarla a una bodega en concreto, o a todas.</p>
         <div id="scheduleList" style="margin-bottom:12px;"></div>
         <div class="row">
+          <div class="field">
+            <label>Bodega</label>
+            <select id="schBodega">
+              <option value="">Todas las bodegas</option>
+            </select>
+          </div>
           <div class="field">
             <label>Día</label>
             <select id="schDay">
@@ -706,6 +712,33 @@
           <button class="primary" id="addScheduleBtn">Programar</button>
         </div>
         <div class="status" id="scheduleStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Gestionar usuarios</h2>
+        <p class="note">
+          Cada persona inicia sesión con su propio usuario y clave (ya no hay una sola clave para todo). "Admin" ve y edita todo.
+          Un usuario limitado solo ve y edita las bodegas que le marques aquí — ni siquiera puede ver las demás.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Clave nueva</th>
+              <th>Admin</th>
+              <th>Bodegas permitidas</th>
+              <th>Crear bodegas</th>
+              <th>Solo comentar</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="usuariosTbody"></tbody>
+        </table>
+        <p class="note" style="margin:8px 0 0;">Deja "Clave nueva" vacío al editar un usuario existente si no quieres cambiarle la clave.</p>
+        <div class="footer-actions">
+          <button id="addUsuarioBtn">+ Agregar usuario</button>
+        </div>
+        <div class="status" id="usuariosStatus"></div>
       </div>
 
       <div class="card">
@@ -735,10 +768,6 @@
 // La "anon key" está pensada para ser pública, va en el navegador sin problema.
 const SUPABASE_URL = "https://zxwoqchsiuhfhgwpjlvo.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Oa1Em5CV8Unlf9IeFJtiPA_didmx56e";
-
-// Clave para entrar al panel de administración (Productos permitidos + Alerta programada).
-// Cámbiala por la que quieras usar:
-const ADMIN_PASSWORD = "bodega2026";
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -775,18 +804,73 @@ async function asegurarXLSX(){ if(typeof XLSX==='undefined') await cargarScript(
 async function asegurarExcelJS(){ if(typeof ExcelJS==='undefined') await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'); }
 async function asegurarTesseract(){ if(typeof Tesseract==='undefined') await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js'); }
 
+// ================== Usuarios y permisos por bodega ==================
+// Ya no hay una sola clave para todo. Cada persona inicia sesión con su
+// propio usuario y clave (los administras en el panel admin, o de una
+// vez tienes admin/bodega2026 y troncal/troncal2026 creados de ejemplo).
+function getSession(){
+  try{ return JSON.parse(sessionStorage.getItem('app-session') || 'null'); }
+  catch(e){ return null; }
+}
+function setSession(s){ sessionStorage.setItem('app-session', JSON.stringify(s)); }
+function clearSession(){ sessionStorage.removeItem('app-session'); }
+
 function isAdmin(){
-  return sessionStorage.getItem('admin-unlocked') === '1';
+  const s = getSession();
+  return !!(s && s.esAdmin);
+}
+function puedeEditarBodega(nombreBodega){
+  const s = getSession();
+  if(!s) return false;
+  if(s.esAdmin) return true;
+  return (s.bodegasPermitidas||[]).includes(nombreBodega);
+}
+function puedeSoloComentar(nombreBodega){
+  const s = getSession();
+  if(!s || s.esAdmin) return false;
+  return !!s.soloComentario && (s.bodegasPermitidas||[]).includes(nombreBodega);
+}
+function puedeCrearBodegasFn(){
+  const s = getSession();
+  return !!(s && (s.esAdmin || s.puedeCrearBodegas));
 }
 
-function requireAdmin(){
+async function iniciarSesion(){
+  const usuario = window.prompt('Usuario:');
+  if(usuario === null) return false;
+  const clave = window.prompt('Clave:');
+  if(clave === null) return false;
+  try{
+    const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario.trim(), p_password: clave});
+    if(error) throw error;
+    if(!data){ alert('Usuario o clave incorrectos.'); return false; }
+    setSession({username: data.username, password: clave, esAdmin: data.esAdmin, bodegasPermitidas: data.bodegasPermitidas||[], puedeCrearBodegas: data.puedeCrearBodegas, soloComentario: data.soloComentario});
+    return true;
+  }catch(e){
+    alert('No se pudo validar el usuario: ' + e.message);
+    return false;
+  }
+}
+
+// Para el panel admin completo (Gestionar bodegas, Categorías, Destinatarios, etc.)
+async function requireAdmin(){
   if(isAdmin()) return true;
-  const pass = window.prompt('Esta acción es solo para administradores. Escribe la clave:');
-  if(pass === null) return false;
-  if(pass !== ADMIN_PASSWORD){ alert('Clave incorrecta.'); return false; }
-  sessionStorage.setItem('admin-unlocked', '1');
+  if(!(await iniciarSesion())) return false;
+  if(!isAdmin()){ alert('Tu usuario no tiene acceso al panel de administración completo.'); return false; }
   return true;
 }
+
+// Para el botón "Editar" de una bodega puntual (Inventario o Troncal)
+async function requireEditBodega(nombreBodega){
+  if(puedeEditarBodega(nombreBodega) || puedeSoloComentar(nombreBodega)) return true;
+  if(!(await iniciarSesion())) return false;
+  if(!puedeEditarBodega(nombreBodega) && !puedeSoloComentar(nombreBodega)){
+    alert('Tu usuario no tiene permiso para editar esta bodega.');
+    return false;
+  }
+  return true;
+}
+
 function normalizeName(s){ return String(s).trim().toLowerCase().replace(/\s+/g,' '); }
 
 function setStatus(id, msg, cls){
@@ -837,7 +921,7 @@ async function loadAll(){
     items = (prod.data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
     permitidos = (perm.data||[]).map(r=>({id:r.id, nombre:r.nombre_exacto, etiqueta:r.etiqueta, min:Number(r.minimo_defecto), grupo:r.grupo}));
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
-    schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo}));
+    schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo, bodega:r.bodega}));
     troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal', tipoMaterial:r.tipo_material||'carrete'}));
     bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, registraEntregas:r.registra_entregas, orden:r.orden}));
     if(!bodegas.some(b=>b.nombre===currentStockBodega && b.tipo==='stock')){
@@ -914,7 +998,7 @@ let invEditing = false;
 let invSearch = '';
 
 function render(){
-  const editable = isAdmin() && invEditing;
+  const editable = puedeEditarBodega(currentStockBodega) && invEditing;
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
   const q = normalizeName(invSearch);
@@ -1044,7 +1128,7 @@ async function renderEntregaCard(){
     const {data, error} = await sb.from('entregas').select('*').eq('bodega', currentStockBodega).order('creado_en', {ascending:false}).limit(20);
     if(error) throw error;
     if(!data.length){ list.innerHTML = '<span class="note" style="margin:0;">Todavía no hay entregas registradas en esta bodega.</span>'; return; }
-    const admin = isAdmin();
+    const admin = puedeEditarBodega(currentStockBodega);
     list.innerHTML = '<p class="note" style="margin:0 0 8px;font-weight:600;">Entregas recientes:</p>' + data.map(en=>{
       const fecha = en.fecha ? new Date(en.fecha+'T00:00:00').toLocaleDateString('es-CO') : '';
       return `
@@ -1082,6 +1166,8 @@ async function renderEntregaCard(){
 }
 
 document.getElementById('registrarEntregaBtn').addEventListener('click', async ()=>{
+  if(!(await requireEditBodega(currentStockBodega))) return;
+
   const nombreProducto = document.getElementById('entregaProducto').value;
   const cantidad = parseFloat(document.getElementById('entregaCantidad').value);
   const entregadoA = document.getElementById('entregaA').value.trim();
@@ -1115,16 +1201,16 @@ document.getElementById('registrarEntregaBtn').addEventListener('click', async (
   setStatus('entregaStatus', `Entrega registrada: ${cantidad} de "${nombreProducto}" a ${entregadoA}. Quedan ${item.qty}.`, 'ok');
 });
 
-document.getElementById('invEditBtn').addEventListener('click', ()=>{
+document.getElementById('invEditBtn').addEventListener('click', async ()=>{
   if(invEditing){
     invEditing = false;
-    sessionStorage.removeItem('admin-unlocked'); // pide la clave de nuevo la próxima vez
+    clearSession(); // pide usuario y clave de nuevo la próxima vez
     render();
     renderEntregaCard();
     setStatus('uploadStatus','Cambios guardados. Edición cerrada.','ok');
     return;
   }
-  if(!requireAdmin()) return;
+  if(!(await requireEditBodega(currentStockBodega))) return;
   invEditing = true;
   render();
   renderEntregaCard();
@@ -1385,6 +1471,111 @@ document.getElementById('bulkAddBtn').addEventListener('click', async ()=>{
 });
 
 // ================== Gestionar bodegas ==================
+// ================== Gestionar usuarios ==================
+let usuariosApp = [];
+
+async function renderUsuariosAdmin(){
+  const tbody = document.getElementById('usuariosTbody');
+  if(!tbody) return;
+  const s = getSession();
+  if(!s || !s.esAdmin){ tbody.innerHTML = ''; return; }
+
+  try{
+    const {data, error} = await sb.rpc('listar_usuarios_admin', {p_username: s.username, p_password: s.password});
+    if(error) throw error;
+    usuariosApp = (data || []).map(u=>({...u, clave: ''}));
+  }catch(e){
+    tbody.innerHTML = `<tr><td colspan="7"><span class="note" style="color:var(--red);">Error: ${escapeHtml(e.message)}</span></td></tr>`;
+    return;
+  }
+  dibujarUsuariosAdmin();
+}
+
+function dibujarUsuariosAdmin(){
+  const tbody = document.getElementById('usuariosTbody');
+  tbody.innerHTML = '';
+  usuariosApp.forEach(u=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td data-label="Usuario"><input type="text" value="${escapeHtml(u.username)}" data-ufield="username" data-uid="${u.id}" style="width:100%;"></td>
+      <td data-label="Clave nueva"><input type="password" placeholder="(sin cambios)" data-ufield="clave" data-uid="${u.id}" style="width:100%;"></td>
+      <td data-label="Admin" style="text-align:center;"><input type="checkbox" data-ufield="esAdmin" data-uid="${u.id}" ${u.esAdmin?'checked':''}></td>
+      <td data-label="Bodegas permitidas"><input type="text" value="${escapeHtml((u.bodegasPermitidas||[]).join(', '))}" data-ufield="bodegasPermitidas" data-uid="${u.id}" placeholder="ej: Troncal, Corporativo" style="width:100%;" ${u.esAdmin?'disabled':''}></td>
+      <td data-label="Crear bodegas" style="text-align:center;"><input type="checkbox" data-ufield="puedeCrearBodegas" data-uid="${u.id}" ${u.puedeCrearBodegas?'checked':''}></td>
+      <td data-label="Solo comentar" style="text-align:center;"><input type="checkbox" data-ufield="soloComentario" data-uid="${u.id}" ${u.soloComentario?'checked':''} ${u.esAdmin?'disabled':''}></td>
+      <td data-label="">
+        <button class="primary" data-guardar-usuario="${u.id}" style="font-size:11px;padding:6px 10px;">💾 Guardar</button>
+        ${u.esAdmin ? '' : `<button class="del" data-remove-usuario="${u.id}" title="Eliminar">✕</button>`}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('[data-ufield]').forEach(inp=>{
+    inp.addEventListener('change', (e)=>{
+      const u = usuariosApp.find(x=>x.id===e.target.dataset.uid);
+      if(!u) return;
+      const field = e.target.dataset.ufield;
+      if(field==='esAdmin' || field==='puedeCrearBodegas' || field==='soloComentario'){
+        u[field] = e.target.checked;
+        if(field==='esAdmin') dibujarUsuariosAdmin(); // refresca para des/habilitar campos que no aplican a admins
+      } else if(field==='bodegasPermitidas'){
+        u.bodegasPermitidas = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
+      } else if(field==='clave'){
+        u.clave = e.target.value;
+      } else {
+        u[field] = e.target.value;
+      }
+    });
+  });
+
+  tbody.querySelectorAll('[data-guardar-usuario]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const u = usuariosApp.find(x=>x.id===btn.dataset.guardarUsuario);
+      if(!u) return;
+      if(!u.username || !u.username.trim()){ setStatus('usuariosStatus','El nombre de usuario no puede quedar vacío.','err'); return; }
+      if(!u.id && !u.clave){ setStatus('usuariosStatus','Un usuario nuevo necesita una clave.','err'); return; }
+      const s = getSession();
+      try{
+        const {data, error} = await sb.rpc('guardar_usuario_admin', {
+          p_admin_username: s.username, p_admin_password: s.password,
+          p_id: u.id || null, p_username: u.username.trim(), p_password: u.clave || null,
+          p_es_admin: !!u.esAdmin, p_bodegas_permitidas: u.bodegasPermitidas||[],
+          p_puede_crear_bodegas: !!u.puedeCrearBodegas, p_solo_comentario: !!u.soloComentario
+        });
+        if(error) throw error;
+        setStatus('usuariosStatus', `Usuario "${u.username}" guardado.`, 'ok');
+        await renderUsuariosAdmin();
+      }catch(e){
+        setStatus('usuariosStatus', 'Error: ' + e.message, 'err');
+      }
+    });
+  });
+
+  tbody.querySelectorAll('[data-remove-usuario]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const u = usuariosApp.find(x=>x.id===btn.dataset.removeUsuario);
+      if(!u) return;
+      if(!confirm(`¿Eliminar el usuario "${u.username}"? Ya no va a poder iniciar sesión.`)) return;
+      const s = getSession();
+      try{
+        const {error} = await sb.rpc('eliminar_usuario_admin', {p_admin_username: s.username, p_admin_password: s.password, p_id: u.id});
+        if(error) throw error;
+        await renderUsuariosAdmin();
+        setStatus('usuariosStatus', 'Usuario eliminado.', 'ok');
+      }catch(e){
+        setStatus('usuariosStatus', 'Error: ' + e.message, 'err');
+      }
+    });
+  });
+}
+
+document.getElementById('addUsuarioBtn').addEventListener('click', ()=>{
+  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false});
+  dibujarUsuariosAdmin();
+  setStatus('usuariosStatus', 'Escribe el usuario, ponle una clave, marca sus bodegas permitidas, y dale "💾 Guardar".', 'ok');
+});
+
 function renderBodegasAdmin(){
   const tbody = document.getElementById('bodegasTbody');
   if(!tbody) return;
@@ -1529,19 +1720,22 @@ function updateRecipientsVisibility(unlocked){
   document.getElementById('recipientsCard').style.display = unlocked ? '' : 'none';
 }
 
-document.getElementById('recipientsUnlockBtn').addEventListener('click', ()=>{
-  if(!requireAdmin()) return;
+document.getElementById('recipientsUnlockBtn').addEventListener('click', async ()=>{
+  if(!(await requireAdmin())) return;
   updateRecipientsVisibility(true);
 });
 
 document.getElementById('recipientsLockBtn').addEventListener('click', ()=>{
-  sessionStorage.removeItem('admin-unlocked');
+  clearSession();
   updateRecipientsVisibility(false);
 });
 
 // ================== Bodegas: selectores ==================
 async function crearBodegaRapida(lado){
-  if(!requireAdmin()) return;
+  if(!puedeCrearBodegasFn()){
+    if(!(await iniciarSesion())) return;
+    if(!puedeCrearBodegasFn()){ alert('Tu usuario no tiene permiso para crear bodegas.'); return; }
+  }
   const nombre = window.prompt('Nombre de la nueva bodega:');
   if(!nombre || !nombre.trim()) return;
   if(bodegas.some(b=>normalizeName(b.nombre)===normalizeName(nombre.trim()))){
@@ -1570,6 +1764,17 @@ async function crearBodegaRapida(lado){
   };
   bodegas.push(b);
   await saveBodega(b);
+
+  // Si quien la creó es un usuario limitado (no admin), le asigna la bodega
+  // nueva automáticamente para que sí pueda editarla después.
+  const s = getSession();
+  if(s && !s.esAdmin){
+    try{
+      const {data} = await sb.rpc('agregar_bodega_permitida', {p_username: s.username, p_password: s.password, p_bodega: b.nombre});
+      if(data) setSession({...s, bodegasPermitidas: data.bodegasPermitidas||[]});
+    }catch(e){ console.error(e); }
+  }
+
   renderBodegasAdmin();
   renderHistorialBodegaSelect();
   renderReporteManualBodegaSelect();
@@ -1642,13 +1847,25 @@ function resincronizarPestana(lado){
   }
 }
 
+// Si hay una sesión de un usuario LIMITADO activa, esa persona solo ve las
+// bodegas que tiene permitidas — nada más, ni para mirar. Sin sesión, o con
+// sesión de admin, se ven todas las que no estén ocultas (comportamiento normal).
+function bodegasVisiblesPara(lado){
+  const s = getSession();
+  let lista = bodegas.filter(b => b.lado===lado && (!b.oculta || isAdmin()));
+  if(s && !s.esAdmin){
+    lista = lista.filter(b => (s.bodegasPermitidas||[]).includes(b.nombre));
+  }
+  return lista;
+}
+
 function renderStockSwitcher(){
   const box = document.getElementById('stockSwitcher');
   if(!box) return;
-  const visibles = bodegas.filter(b => b.lado==='inventario' && (!b.oculta || isAdmin()));
+  const visibles = bodegasVisiblesPara('inventario');
   box.innerHTML = visibles.map(b=>`
     <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===bodegaEnInventarioSlot?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}${b.tipo==='log'?' 📋':''}</button>
-  `).join('') + (isAdmin() ? `<button data-nueva-bodega-lado="inventario" title="Crear otra bodega en Inventario (elige cómo se comporta)">+ Nueva bodega</button>` : '');
+  `).join('') + (puedeCrearBodegasFn() ? `<button data-nueva-bodega-lado="inventario" title="Crear otra bodega en Inventario (elige cómo se comporta)">+ Nueva bodega</button>` : '');
   box.querySelectorAll('[data-bod]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const b = bodegas.find(x=>x.nombre===btn.dataset.bod);
@@ -1657,15 +1874,21 @@ function renderStockSwitcher(){
   });
   const nuevaBtn = box.querySelector('[data-nueva-bodega-lado]');
   if(nuevaBtn) nuevaBtn.addEventListener('click', ()=>crearBodegaRapida('inventario'));
+
+  // Si lo que había seleccionado quedó fuera de lo permitido, se cambia sola
+  // a la primera bodega que sí pueda ver.
+  if(visibles.length && !visibles.some(b=>b.nombre===bodegaEnInventarioSlot)){
+    seleccionarBodega(visibles[0]);
+  }
 }
 
 function renderLogSwitcher(){
   const box = document.getElementById('logSwitcher');
   if(!box) return;
-  const visibles = bodegas.filter(b => b.lado==='troncal' && (!b.oculta || isAdmin()));
+  const visibles = bodegasVisiblesPara('troncal');
   box.innerHTML = visibles.map(b=>`
     <button data-bod="${escapeHtml(b.nombre)}" class="${b.nombre===bodegaEnTroncalSlot?'active':''}">${escapeHtml(b.nombre)}${b.oculta?' 🔒':''}${b.tipo==='stock'?' 📦':''}</button>
-  `).join('') + (isAdmin() ? `<button data-nueva-bodega-lado="troncal" title="Crear otra bodega en Troncal (elige cómo se comporta)">+ Nueva bodega</button>` : '');
+  `).join('') + (puedeCrearBodegasFn() ? `<button data-nueva-bodega-lado="troncal" title="Crear otra bodega en Troncal (elige cómo se comporta)">+ Nueva bodega</button>` : '');
   box.querySelectorAll('[data-bod]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const b = bodegas.find(x=>x.nombre===btn.dataset.bod);
@@ -1674,6 +1897,10 @@ function renderLogSwitcher(){
   });
   const nuevaBtn = box.querySelector('[data-nueva-bodega-lado]');
   if(nuevaBtn) nuevaBtn.addEventListener('click', ()=>crearBodegaRapida('troncal'));
+
+  if(visibles.length && !visibles.some(b=>b.nombre===bodegaEnTroncalSlot)){
+    seleccionarBodega(visibles[0]);
+  }
 }
 
 function renderRecipients(){
@@ -1790,12 +2017,23 @@ document.getElementById('sendAllBtn').addEventListener('click', ()=>enviarReport
 // ================== Alerta programada ==================
 const DIAS = {0:'Domingo',1:'Lunes',2:'Martes',3:'Miércoles',4:'Jueves',5:'Viernes',6:'Sábado'};
 
+function renderSchBodegaSelect(){
+  const sel = document.getElementById('schBodega');
+  if(!sel) return;
+  const actual = sel.value;
+  const stockBodegas = bodegas.filter(b=>b.tipo==='stock');
+  sel.innerHTML = '<option value="">Todas las bodegas</option>' +
+    stockBodegas.map(b=>`<option value="${escapeHtml(b.nombre)}">${escapeHtml(b.nombre)}</option>`).join('');
+  sel.value = actual || '';
+}
+
 function renderSchedules(){
+  renderSchBodegaSelect();
   const box = document.getElementById('scheduleList');
   if(!schedules.length){ box.innerHTML = '<span class="note" style="margin:0;">No hay alertas programadas todavía.</span>'; return; }
   box.innerHTML = schedules.map(s=>`
     <span class="badge ${s.activo?'ok':'warn'}" style="margin:3px 6px 3px 0;display:inline-flex;align-items:center;gap:6px;">
-      ${DIAS[s.dia]} ${String(s.hora).padStart(2,'0')}:${String(s.minuto).padStart(2,'0')}
+      ${s.bodega ? escapeHtml(s.bodega) : 'Todas'} · ${DIAS[s.dia]} ${String(s.hora).padStart(2,'0')}:${String(s.minuto).padStart(2,'0')}
       <button class="del" data-remove-sched="${s.id}" style="padding:0;font-size:13px;">✕</button>
     </span>
   `).join('');
@@ -1810,15 +2048,16 @@ function renderSchedules(){
 }
 
 document.getElementById('addScheduleBtn').addEventListener('click', async ()=>{
+  const bodega = document.getElementById('schBodega').value || null;
   const dia = parseInt(document.getElementById('schDay').value);
   const hora = parseInt(document.getElementById('schHour').value);
   const minuto = parseInt(document.getElementById('schMin').value) || 0;
   try{
-    const {data, error} = await sb.from('alertas_programadas').insert({dia_semana:dia, hora, minuto, activo:true}).select().single();
+    const {data, error} = await sb.from('alertas_programadas').insert({dia_semana:dia, hora, minuto, activo:true, bodega}).select().single();
     if(error) throw error;
-    schedules.push({id:data.id, dia:data.dia_semana, hora:data.hora, minuto:data.minuto, activo:data.activo});
+    schedules.push({id:data.id, dia:data.dia_semana, hora:data.hora, minuto:data.minuto, activo:data.activo, bodega:data.bodega});
     renderSchedules();
-    setStatus('scheduleStatus', 'Alerta programada. Se revisa cada 5 min en el servidor.', 'ok');
+    setStatus('scheduleStatus', `Alerta programada para "${bodega || 'todas las bodegas'}". Se revisa cada 5 min en el servidor.`, 'ok');
   }catch(e){
     setStatus('scheduleStatus', 'Error: ' + e.message, 'err');
   }
@@ -1830,7 +2069,8 @@ let troncalSearch = '';
 let troncalTipoFiltro = '';
 
 function renderTroncal(){
-  const editable = isAdmin() && troncalEditing;
+  const fullEdit = puedeEditarBodega(currentLogBodega) && troncalEditing;
+  const soloComentar = !fullEdit && puedeSoloComentar(currentLogBodega) && troncalEditing;
   const tbody = document.getElementById('troncalTbody');
   tbody.innerHTML = '';
   const q = normalizeName(troncalSearch);
@@ -1839,7 +2079,8 @@ function renderTroncal(){
   if(q) visibles = visibles.filter(en => normalizeName(en.material||'').includes(q));
   visibles.forEach(en=>{
     const tr = document.createElement('tr');
-    const dis = editable ? '' : 'disabled';
+    const dis = fullEdit ? '' : 'disabled';
+    const disObs = (fullEdit || soloComentar) ? '' : 'disabled'; // Observación se puede editar en modo "solo comentar" también
     const tipoMat = en.tipoMaterial || 'carrete';
     tr.innerHTML = `
       <td data-label="Material"><input type="text" value="${escapeHtml(en.material||'')}" ${dis} data-tfield="material" data-tid="${en.id}" style="width:100%;"></td>
@@ -1852,14 +2093,14 @@ function renderTroncal(){
       <td style="text-align:right;" data-label="Metros"><input type="number" min="0" value="${en.metros}" ${dis} data-tfield="metros" data-tid="${en.id}" style="width:90px;text-align:right;"></td>
       <td data-label="Entregado a"><input type="text" value="${escapeHtml(en.entregadoA||'')}" ${dis} data-tfield="entregadoA" data-tid="${en.id}" style="width:100%;"></td>
       <td data-label="Fecha"><input type="date" value="${en.fecha||''}" ${dis} data-tfield="fecha" data-tid="${en.id}"></td>
-      <td data-label="Observación / Devuelto"><input type="text" value="${escapeHtml(en.observacion||'')}" ${dis} data-tfield="observacion" data-tid="${en.id}" placeholder="ej: se devolvieron 20m" style="width:100%;"></td>
-      <td data-label="">${editable ? `<button class="del" data-remove-troncal="${en.id}" title="Eliminar">✕</button>` : ''}</td>
+      <td data-label="Observación / Devuelto"><input type="text" value="${escapeHtml(en.observacion||'')}" ${disObs} data-tfield="observacion" data-tid="${en.id}" placeholder="ej: se devolvieron 20m" style="width:100%;"></td>
+      <td data-label="">${fullEdit ? `<button class="del" data-remove-troncal="${en.id}" title="Eliminar">✕</button>` : ''}</td>
     `;
     tbody.appendChild(tr);
   });
 
-  if(editable){
-    tbody.querySelectorAll('[data-tfield]').forEach(inp=>{
+  if(fullEdit || soloComentar){
+    tbody.querySelectorAll('[data-tfield]:not([disabled])').forEach(inp=>{
       inp.addEventListener('change', async (e)=>{
         const en = troncalEntries.find(x=>x.id===e.target.dataset.tid);
         if(!en) return;
@@ -1869,6 +2110,8 @@ function renderTroncal(){
         if(field==='tipoMaterial') renderTroncal();
       });
     });
+  }
+  if(fullEdit){
     tbody.querySelectorAll('[data-remove-troncal]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const id = btn.dataset.removeTroncal;
@@ -1879,10 +2122,11 @@ function renderTroncal(){
     });
   }
 
-  document.getElementById('troncalActions').style.display = editable ? '' : 'none';
-  document.getElementById('troncalBulkCard').style.display = editable ? '' : 'none';
-  document.getElementById('troncalExcelCard').style.display = editable ? '' : 'none';
-  document.getElementById('troncalEditBtn').textContent = editable ? '✔ Guardar y cerrar' : '🔒 Editar';
+  // Agregar/cargar por Excel/vaciar fechas: solo con edición completa (no en modo "solo comentar")
+  document.getElementById('troncalActions').style.display = fullEdit ? '' : 'none';
+  document.getElementById('troncalBulkCard').style.display = fullEdit ? '' : 'none';
+  document.getElementById('troncalExcelCard').style.display = fullEdit ? '' : 'none';
+  document.getElementById('troncalEditBtn').textContent = (fullEdit || soloComentar) ? '✔ Guardar y cerrar' : '🔒 Editar';
 }
 
 async function saveTroncal(en){
@@ -1920,15 +2164,15 @@ document.getElementById('tipoMaterialSwitch').addEventListener('click', (e)=>{
   renderTroncal();
 });
 
-document.getElementById('troncalEditBtn').addEventListener('click', ()=>{
+document.getElementById('troncalEditBtn').addEventListener('click', async ()=>{
   if(troncalEditing){
     troncalEditing = false;
-    sessionStorage.removeItem('admin-unlocked'); // pide la clave de nuevo la próxima vez
+    clearSession(); // pide usuario y clave de nuevo la próxima vez
     renderTroncal();
     setStatus('troncalAlertStatus','Cambios guardados. Edición cerrada.','ok');
     return;
   }
-  if(!requireAdmin()) return;
+  if(!(await requireEditBodega(currentLogBodega))) return;
   troncalEditing = true;
   renderTroncal();
 });
@@ -2265,7 +2509,7 @@ function switchTab(name){
   const adminPanel = document.querySelector('.tab-panel[data-panel="admin"]');
   const veniamosDelAdmin = adminPanel.style.display !== 'none';
   if(veniamosDelAdmin && name !== 'admin'){
-    sessionStorage.removeItem('admin-unlocked');
+    clearSession();
     invEditing = false;
     troncalEditing = false;
     render();
@@ -2286,12 +2530,13 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>switchTab(btn.dataset.tab));
 });
 
-document.getElementById('adminGearBtn').addEventListener('click', ()=>{
-  if(!requireAdmin()) return;
+document.getElementById('adminGearBtn').addEventListener('click', async ()=>{
+  if(!(await requireAdmin())) return;
   render();
   renderTroncal();
   renderEntregaCard();
   cargarHistorial();
+  renderUsuariosAdmin();
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>{ p.style.display = (p.dataset.panel==='admin') ? '' : 'none'; });
   window.scrollTo({top:0, behavior:'instant'});
