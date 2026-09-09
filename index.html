@@ -136,6 +136,26 @@
   .tab-btn.active{background:var(--panel3);color:var(--cyan);}
   .tab-btn .tab-label{white-space:nowrap;}
 
+  /* ---------- Barra lateral en PC (pantallas anchas) ----------
+     El celular no se toca: esta regla solo aplica desde 900px de ancho
+     en adelante, así que en móvil sigue viéndose igual que siempre. */
+  @media (min-width: 900px){
+    .app{max-width:none;margin:0;padding:0;}
+    .topbar{margin:0;padding:14px 24px;}
+    .summary, #setupBanner{margin-left:230px;padding:0 28px;max-width:900px;}
+    main{margin-left:230px;padding:0 28px 40px;max-width:900px;}
+    .tabs{
+      position:fixed;left:0;top:65px;bottom:0;width:210px;
+      flex-direction:column;align-items:stretch;gap:2px;
+      border-radius:0;border:none;border-right:1px solid var(--line);
+      background:var(--panel);padding:16px 12px;overflow-y:auto;
+      margin:0;z-index:30;
+    }
+    .tab-btn{flex-direction:row;justify-content:flex-start;padding:10px 12px;font-size:13px;}
+    .tab-btn svg{width:18px;height:18px;}
+    .tab-btn.active{border-left:2px solid var(--cyan);}
+  }
+
   /* ---------- Cards ---------- */
   .card{
     background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
@@ -304,6 +324,39 @@
 <body>
 <div class="app">
 <div id="viewBlocksStorage" style="display:none;"></div>
+
+<div id="loginModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(5,8,11,0.72);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;padding:16px;">
+  <div class="card" style="max-width:380px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+    <svg width="52" height="52" viewBox="0 0 30 30" fill="none" style="margin:0 auto 14px;display:block;">
+      <circle cx="15" cy="15" r="13" stroke="#3fd0c0" stroke-width="1.4" opacity="0.35"/>
+      <circle cx="15" cy="15" r="7.5" stroke="#3fd0c0" stroke-width="1.6"/>
+      <circle cx="15" cy="15" r="2.4" fill="#3fd0c0"/>
+      <path d="M15 1.5V5M15 25V28.5M1.5 15H5M25 15H28.5" stroke="#3fd0c0" stroke-width="1.4" stroke-linecap="round" opacity="0.6"/>
+    </svg>
+    <h1 style="font-size:18px;margin:0 0 2px;">Control de Materiales</h1>
+    <p class="note" style="margin:0 0 20px;">Inicia sesión para continuar</p>
+
+    <div id="loginBienvenida" style="display:none;margin-bottom:16px;">
+      <p style="margin:0;font-weight:700;">Bienvenido, <span id="loginNombreGuardado" style="color:var(--cyan);"></span></p>
+      <button id="loginCambiarUsuarioBtn" style="background:none;border:none;color:var(--text-mut);text-decoration:underline;font-size:12px;cursor:pointer;padding:4px;">Cambiar usuario</button>
+    </div>
+
+    <div id="loginCamposUsuario" style="text-align:left;margin-bottom:10px;">
+      <label>Usuario</label>
+      <input type="text" id="loginUsuario" autocomplete="username">
+    </div>
+    <div style="text-align:left;margin-bottom:12px;">
+      <label>Clave</label>
+      <input type="password" id="loginClave" autocomplete="current-password">
+    </div>
+    <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-mut);margin:4px 0 18px;cursor:pointer;text-align:left;">
+      <input type="checkbox" id="loginRecordar"> Recordar sesión en este dispositivo
+    </label>
+    <button class="primary" id="loginIngresarBtn" style="width:100%;padding:11px;font-size:13.5px;">Ingresar</button>
+    <div class="status" id="loginStatus" style="min-height:18px;"></div>
+    <button id="loginCancelarBtn" style="margin-top:8px;font-size:11.5px;background:none;border:none;color:var(--text-dim);cursor:pointer;">Cancelar</button>
+  </div>
+</div>
 
   <header class="topbar">
     <div class="brand">
@@ -587,6 +640,18 @@
           <button id="addRecipientBtn">Agregar</button>
         </div>
         <div class="status" id="recipientsStatus"></div>
+
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft);">
+          <h2 style="cursor:pointer;font-size:13px;" id="telegramHelperToggle">🔍 ¿No sabes el chat_id de alguien? Pégalo aquí y te lo saco solo ▾</h2>
+          <div id="telegramHelperBody" style="display:none;margin-top:10px;">
+            <p class="note">Abre <code>https://api.telegram.org/bot&lt;TU_TOKEN&gt;/getUpdates</code> en el navegador (la persona ya le debe haber escrito al bot antes), selecciona TODO el texto que aparece (Ctrl+A) y pégalo aquí abajo.</p>
+            <textarea id="telegramHelperTexto" style="min-height:100px;" placeholder="Pega aquí el texto completo de esa página..."></textarea>
+            <div class="row" style="margin-top:8px;">
+              <button class="primary" id="telegramHelperAnalizarBtn">Analizar</button>
+            </div>
+            <div id="telegramHelperResultados" style="margin-top:10px;"></div>
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -809,11 +874,20 @@ async function asegurarTesseract(){ if(typeof Tesseract==='undefined') await car
 // propio usuario y clave (los administras en el panel admin, o de una
 // vez tienes admin/bodega2026 y troncal/troncal2026 creados de ejemplo).
 function getSession(){
-  try{ return JSON.parse(sessionStorage.getItem('app-session') || 'null'); }
-  catch(e){ return null; }
+  try{
+    let s = JSON.parse(sessionStorage.getItem('app-session') || 'null');
+    if(!s){
+      const recordada = localStorage.getItem('sesion-recordada');
+      if(recordada){ s = JSON.parse(recordada); sessionStorage.setItem('app-session', recordada); }
+    }
+    return s;
+  }catch(e){ return null; }
 }
 function setSession(s){ sessionStorage.setItem('app-session', JSON.stringify(s)); }
-function clearSession(){ sessionStorage.removeItem('app-session'); }
+function clearSession(){
+  sessionStorage.removeItem('app-session');
+  localStorage.removeItem('sesion-recordada');
+}
 
 function isAdmin(){
   const s = getSession();
@@ -835,21 +909,82 @@ function puedeCrearBodegasFn(){
   return !!(s && (s.esAdmin || s.puedeCrearBodegas));
 }
 
+function mostrarModalLogin(){
+  return new Promise(resolve=>{
+    const overlay = document.getElementById('loginModalOverlay');
+    const ultimoUsuario = localStorage.getItem('ultimo-usuario');
+    const bienvenida = document.getElementById('loginBienvenida');
+    const camposUsuario = document.getElementById('loginCamposUsuario');
+
+    if(ultimoUsuario){
+      bienvenida.style.display = '';
+      camposUsuario.style.display = 'none';
+      document.getElementById('loginNombreGuardado').textContent = ultimoUsuario;
+    } else {
+      bienvenida.style.display = 'none';
+      camposUsuario.style.display = '';
+    }
+    document.getElementById('loginUsuario').value = ultimoUsuario || '';
+    document.getElementById('loginClave').value = '';
+    document.getElementById('loginRecordar').checked = false;
+    setStatus('loginStatus', '', '');
+    overlay.style.display = 'flex';
+
+    const ingresarBtn = document.getElementById('loginIngresarBtn');
+    const cambiarBtn = document.getElementById('loginCambiarUsuarioBtn');
+    const cancelarBtn = document.getElementById('loginCancelarBtn');
+    const claveInput = document.getElementById('loginClave');
+
+    function limpiar(){
+      overlay.style.display = 'none';
+      ingresarBtn.removeEventListener('click', onIngresar);
+      cambiarBtn.removeEventListener('click', onCambiar);
+      cancelarBtn.removeEventListener('click', onCancelar);
+      claveInput.removeEventListener('keydown', onEnter);
+    }
+
+    async function onIngresar(){
+      const usandoGuardado = ultimoUsuario && camposUsuario.style.display === 'none';
+      const usuario = usandoGuardado ? ultimoUsuario : document.getElementById('loginUsuario').value.trim();
+      const clave = claveInput.value;
+      const recordar = document.getElementById('loginRecordar').checked;
+      if(!usuario || !clave){ setStatus('loginStatus','Escribe usuario y clave.','err'); return; }
+      ingresarBtn.disabled = true;
+      try{
+        const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario, p_password: clave});
+        if(error) throw error;
+        if(!data){ setStatus('loginStatus','Usuario o clave incorrectos.','err'); ingresarBtn.disabled = false; return; }
+        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario};
+        setSession(sesion);
+        localStorage.setItem('ultimo-usuario', data.username);
+        if(recordar) localStorage.setItem('sesion-recordada', JSON.stringify(sesion));
+        limpiar();
+        resolve(true);
+      }catch(e){
+        setStatus('loginStatus', 'Error: ' + e.message, 'err');
+        ingresarBtn.disabled = false;
+      }
+    }
+    function onCambiar(){
+      localStorage.removeItem('ultimo-usuario');
+      bienvenida.style.display = 'none';
+      camposUsuario.style.display = '';
+      document.getElementById('loginUsuario').value = '';
+      document.getElementById('loginUsuario').focus();
+    }
+    function onCancelar(){ limpiar(); resolve(false); }
+    function onEnter(e){ if(e.key === 'Enter') onIngresar(); }
+
+    ingresarBtn.addEventListener('click', onIngresar);
+    cambiarBtn.addEventListener('click', onCambiar);
+    cancelarBtn.addEventListener('click', onCancelar);
+    claveInput.addEventListener('keydown', onEnter);
+    setTimeout(()=>claveInput.focus(), 50);
+  });
+}
+
 async function iniciarSesion(){
-  const usuario = window.prompt('Usuario:');
-  if(usuario === null) return false;
-  const clave = window.prompt('Clave:');
-  if(clave === null) return false;
-  try{
-    const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario.trim(), p_password: clave});
-    if(error) throw error;
-    if(!data){ alert('Usuario o clave incorrectos.'); return false; }
-    setSession({username: data.username, password: clave, esAdmin: data.esAdmin, bodegasPermitidas: data.bodegasPermitidas||[], puedeCrearBodegas: data.puedeCrearBodegas, soloComentario: data.soloComentario});
-    return true;
-  }catch(e){
-    alert('No se pudo validar el usuario: ' + e.message);
-    return false;
-  }
+  return await mostrarModalLogin();
 }
 
 // Para el panel admin completo (Gestionar bodegas, Categorías, Destinatarios, etc.)
@@ -1972,6 +2107,54 @@ document.getElementById('addRecipientBtn').addEventListener('click', async ()=>{
   }catch(e){
     setStatus('recipientsStatus','No se pudo guardar: ' + e.message, 'err');
   }
+});
+
+// ================== Ayuda para encontrar el chat_id ==================
+document.getElementById('telegramHelperToggle').addEventListener('click', ()=>{
+  const body = document.getElementById('telegramHelperBody');
+  const abierto = body.style.display !== 'none';
+  body.style.display = abierto ? 'none' : '';
+});
+
+document.getElementById('telegramHelperAnalizarBtn').addEventListener('click', ()=>{
+  const texto = document.getElementById('telegramHelperTexto').value.trim();
+  const box = document.getElementById('telegramHelperResultados');
+  if(!texto){ box.innerHTML = '<p class="note" style="margin:0;color:var(--red);">Pega el texto primero.</p>'; return; }
+
+  let data;
+  try{ data = JSON.parse(texto); }
+  catch(e){ box.innerHTML = '<p class="note" style="margin:0;color:var(--red);">Eso no parece el texto completo de esa página. Copia TODO lo que aparece ahí (Ctrl+A) y pégalo de nuevo.</p>'; return; }
+
+  const personas = new Map();
+  (data.result || []).forEach(u=>{
+    const msg = u.message || u.edited_message || u.channel_post;
+    const from = msg && (msg.from || (u.my_chat_member && u.my_chat_member.from));
+    if(!from) return;
+    const nombreCompleto = [from.first_name, from.last_name].filter(Boolean).join(' ');
+    const etiqueta = (nombreCompleto || 'Sin nombre') + (from.username ? ` (@${from.username})` : '');
+    personas.set(String(from.id), {nombre: nombreCompleto || etiqueta, etiqueta});
+  });
+
+  if(!personas.size){
+    box.innerHTML = '<p class="note" style="margin:0;">No encontré a nadie en ese texto. Asegúrate de que la persona ya le haya escrito al bot antes de sacar este texto.</p>';
+    return;
+  }
+
+  box.innerHTML = Array.from(personas.entries()).map(([id, p])=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:13px;">
+      <span>${escapeHtml(p.etiqueta)} <span style="color:var(--text-dim);font-size:11px;">(${id})</span></span>
+      <button data-usar-contacto="${id}" data-usar-nombre="${escapeHtml(p.nombre)}" style="font-size:11px;padding:5px 10px;">Usar este</button>
+    </div>
+  `).join('');
+
+  box.querySelectorAll('[data-usar-contacto]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.getElementById('newChatId').value = btn.dataset.usarContacto;
+      document.getElementById('newChatName').value = btn.dataset.usarNombre;
+      setStatus('recipientsStatus', 'Chat ID y nombre listos — ahora elige las bodegas y dale "Agregar".', 'ok');
+      document.getElementById('newChatId').scrollIntoView({behavior:'smooth', block:'center'});
+    });
+  });
 });
 
 // ================== Reporte manual ==================
