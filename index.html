@@ -387,6 +387,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
       <span class="tab-label">Alertas</span>
     </button>
+    <button class="tab-btn" data-tab="graficos">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-4 4"/></svg>
+      <span class="tab-label">Gráficos</span>
+    </button>
   </nav>
 
   <main>
@@ -679,6 +683,25 @@
       </div>
     </section>
 
+    <section class="tab-panel" data-panel="graficos" style="display:none">
+      <div class="card">
+        <h2>Gráfico de consumo por producto</h2>
+        <p class="note">Muestra cómo ha cambiado la cantidad de un producto en el tiempo, usando el historial real de cambios.</p>
+        <div class="row">
+          <div class="field">
+            <label>Bodega</label>
+            <select id="graficoBodegaSelect"></select>
+          </div>
+          <div class="field">
+            <label>Producto</label>
+            <select id="graficoProductoSelect"></select>
+          </div>
+          <button class="primary" id="verGraficoBtn">Ver gráfico</button>
+        </div>
+        <div id="graficoResultado" style="margin-top:16px;"></div>
+      </div>
+    </section>
+
     <!-- Panel oculto: no tiene botón en la barra de pestañas, solo se abre con el ícono ⚙ + clave -->
     <section class="tab-panel" data-panel="admin" style="display:none">
       <button class="admin-back" id="adminBackBtn">
@@ -819,6 +842,16 @@
       </div>
 
       <div class="card">
+        <h2>🔍 Búsquedas sin resultado</h2>
+        <p class="note">Cada vez que alguien busca algo en "Consultar disponibilidad" y no aparece nada, queda registrado aquí — para que sepas qué te están pidiendo que no tienes en el sistema. Solo tú (admin) puedes ver esto.</p>
+        <div class="row" style="margin-bottom:12px;">
+          <button id="refreshBusquedasBtn">🔄 Actualizar</button>
+          <button class="danger-btn" id="clearBusquedasBtn">Borrar todo</button>
+        </div>
+        <div id="busquedasSinResultadoList" style="max-height:320px;overflow-y:auto;"></div>
+      </div>
+
+      <div class="card">
         <h2>Historial de cambios</h2>
         <p class="note">Cada vez que se crea, edita o borra un producto o una entrega de troncal, queda aquí. Guardado en Supabase, no en tu navegador.</p>
         <div class="row" style="margin-bottom:12px;">
@@ -829,9 +862,11 @@
             </select>
           </div>
           <button id="refreshHistorialBtn" style="align-self:flex-end;">🔄 Actualizar</button>
+          <button id="descargarHistorialBtn" style="align-self:flex-end;">⬇ Descargar Excel</button>
           <button class="danger-btn" id="clearHistorialBtn" style="align-self:flex-end;">Borrar lo filtrado</button>
         </div>
         <div id="historialList" style="max-height:420px;overflow-y:auto;"></div>
+        <div class="status" id="historialStatus"></div>
       </div>
 
     </section>
@@ -985,7 +1020,7 @@ function mostrarModalLogin(){
         const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario, p_password: clave});
         if(error) throw error;
         if(!data){ setStatus('loginStatus','Usuario o clave incorrectos.','err'); ingresarBtn.disabled = false; return; }
-        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas};
+        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas, accesoGraficos:data.accesoGraficos};
         setSession(sesion);
         localStorage.setItem('ultimo-usuario', data.username);
         if(recordar) localStorage.setItem('sesion-recordada', JSON.stringify(sesion));
@@ -1231,6 +1266,100 @@ function proyeccionTexto(nombreProducto, grupo, qty){
   const clase = dias<=3 ? 'color:var(--red);' : dias<=7 ? 'color:var(--amber);' : 'color:var(--text-dim);';
   return `<div style="font-size:10.5px;${clase}margin-top:2px;">⏳ A este ritmo se agota en ~${dias} día${dias===1?'':'s'}</div>`;
 }
+
+// ================== Gráfico de consumo por producto ==================
+function puedeVerGraficos(){
+  const s = getSession();
+  return !!(s && (s.esAdmin || s.accesoGraficos));
+}
+
+function renderGraficoBodegaSelect(){
+  const sel = document.getElementById('graficoBodegaSelect');
+  if(!sel) return;
+  const actual = sel.value;
+  const visibles = bodegas.filter(b => b.tipo==='stock' && (!b.oculta || isAdmin()) && puedeVerBodega(b.nombre));
+  sel.innerHTML = visibles.map(b=>`<option value="${escapeHtml(b.nombre)}">${escapeHtml(b.nombre)}</option>`).join('');
+  sel.value = visibles.some(b=>b.nombre===actual) ? actual : (visibles[0]?.nombre || '');
+  renderGraficoProductoSelect();
+}
+
+function renderGraficoProductoSelect(){
+  const selBodega = document.getElementById('graficoBodegaSelect');
+  const selProd = document.getElementById('graficoProductoSelect');
+  if(!selBodega || !selProd) return;
+  const actual = selProd.value;
+  const enBodega = items.filter(it=>it.grupo===selBodega.value).sort((a,b)=>a.name.localeCompare(b.name));
+  selProd.innerHTML = enBodega.map(it=>`<option value="${escapeHtml(it.name)}">${escapeHtml(it.name)}</option>`).join('');
+  if(enBodega.some(it=>it.name===actual)) selProd.value = actual;
+}
+
+document.getElementById('graficoBodegaSelect').addEventListener('change', renderGraficoProductoSelect);
+
+// Dibuja una gráfica de línea sencilla en SVG, sin depender de ninguna
+// librería externa (mantiene la app liviana).
+function generarGraficoSVG(puntos){
+  if(puntos.length < 2){
+    return '<p class="note" style="margin:0;">Todavía no hay suficientes datos en el historial para graficar este producto (se necesitan al menos 2 cambios de cantidad registrados).</p>';
+  }
+  const ancho = 680, alto = 280;
+  const margen = {top:20, right:20, bottom:34, left:44};
+  const w = ancho - margen.left - margen.right;
+  const h = alto - margen.top - margen.bottom;
+  const valores = puntos.map(p=>p.valor);
+  const minV = 0;
+  const maxV = Math.max(...valores) * 1.15 || 1;
+  const minT = puntos[0].fecha.getTime();
+  const maxT = puntos[puntos.length-1].fecha.getTime();
+  const rangoT = Math.max(1, maxT - minT);
+
+  const coords = puntos.map(p=>{
+    const x = margen.left + ((p.fecha.getTime()-minT)/rangoT)*w;
+    const y = margen.top + h - ((p.valor-minV)/(maxV-minV))*h;
+    return [x,y];
+  });
+  const pathD = coords.map((c,i)=> (i===0?'M':'L') + c[0].toFixed(1) + ',' + c[1].toFixed(1)).join(' ');
+  const puntosSvg = coords.map(([x,y])=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="var(--cyan)"/>`).join('');
+  const fmt = d => d.toLocaleDateString('es-CO', {day:'2-digit', month:'short'});
+
+  return `
+    <svg viewBox="0 0 ${ancho} ${alto}" style="width:100%;height:auto;max-width:680px;">
+      <line x1="${margen.left}" y1="${margen.top}" x2="${margen.left}" y2="${margen.top+h}" stroke="var(--line)"/>
+      <line x1="${margen.left}" y1="${margen.top+h}" x2="${margen.left+w}" y2="${margen.top+h}" stroke="var(--line)"/>
+      <path d="${pathD}" fill="none" stroke="var(--cyan)" stroke-width="2"/>
+      ${puntosSvg}
+      <text x="${margen.left}" y="${alto-8}" font-size="10.5" fill="var(--text-dim)">${fmt(puntos[0].fecha)}</text>
+      <text x="${margen.left+w}" y="${alto-8}" font-size="10.5" fill="var(--text-dim)" text-anchor="end">${fmt(puntos[puntos.length-1].fecha)}</text>
+      <text x="${margen.left-6}" y="${margen.top+4}" font-size="10.5" fill="var(--text-dim)" text-anchor="end">${Math.round(maxV)}</text>
+      <text x="${margen.left-6}" y="${margen.top+h}" font-size="10.5" fill="var(--text-dim)" text-anchor="end">0</text>
+    </svg>
+  `;
+}
+
+document.getElementById('verGraficoBtn').addEventListener('click', async ()=>{
+  const bodega = document.getElementById('graficoBodegaSelect').value;
+  const producto = document.getElementById('graficoProductoSelect').value;
+  const box = document.getElementById('graficoResultado');
+  if(!bodega || !producto){ box.innerHTML = '<p class="note" style="margin:0;">Elige una bodega y un producto primero.</p>'; return; }
+
+  box.innerHTML = '<p class="note" style="margin:0;">Cargando historial…</p>';
+  try{
+    const {data, error} = await sb.from('historial')
+      .select('creado_en, cantidad_nueva')
+      .eq('tabla','productos').eq('nombre_registro', producto).eq('bodega', bodega)
+      .not('cantidad_nueva','is', null)
+      .order('creado_en', {ascending:true});
+    if(error) throw error;
+
+    const puntos = (data||[]).map(h=>({fecha:new Date(h.creado_en), valor:Number(h.cantidad_nueva)}));
+    // agrega el valor actual en vivo como último punto, para que el gráfico esté al día
+    const itemActual = items.find(it=>it.grupo===bodega && it.name===producto);
+    if(itemActual) puntos.push({fecha:new Date(), valor:itemActual.qty});
+
+    box.innerHTML = `<p style="font-weight:600;margin-bottom:10px;">${escapeHtml(producto)} — ${escapeHtml(bodega)}</p>` + generarGraficoSVG(puntos);
+  }catch(e){
+    box.innerHTML = `<p class="note" style="margin:0;color:var(--red);">Error: ${escapeHtml(e.message)}</p>`;
+  }
+});
 
 function render(){
   const editable = puedeEditarBodega(currentStockBodega) && invEditing;
@@ -1776,6 +1905,9 @@ function dibujarUsuariosAdmin(){
               <input type="checkbox" data-ufield="accesoAlertas" data-uid="${u.id}" ${u.accesoAlertas?'checked':''} ${disabledSiAdmin}> 🔔 Pestaña Alertas / enviar reporte manual
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
+              <input type="checkbox" data-ufield="accesoGraficos" data-uid="${u.id}" ${u.accesoGraficos?'checked':''} ${disabledSiAdmin}> 📈 Pestaña Gráficos
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
               <input type="checkbox" data-ufield="puedeCrearBodegas" data-uid="${u.id}" ${u.puedeCrearBodegas?'checked':''}> + Crear bodegas nuevas
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;">
@@ -1846,7 +1978,7 @@ function dibujarUsuariosAdmin(){
           p_es_admin: !!u.esAdmin, p_bodegas_permitidas: u.bodegasPermitidas||[],
           p_puede_crear_bodegas: !!u.puedeCrearBodegas, p_solo_comentario: !!u.soloComentario,
           p_solo_lectura: !!u.soloLectura, p_puede_cargar_excel: !!u.puedeCargarExcel,
-          p_acceso_buscar: !!u.accesoBuscar, p_acceso_alertas: !!u.accesoAlertas
+          p_acceso_buscar: !!u.accesoBuscar, p_acceso_alertas: !!u.accesoAlertas, p_acceso_graficos: !!u.accesoGraficos
         });
         if(error) throw error;
         setStatus('usuariosStatus', `Usuario "${u.username}" guardado.`, 'ok');
@@ -1876,7 +2008,7 @@ function dibujarUsuariosAdmin(){
 }
 
 document.getElementById('addUsuarioBtn').addEventListener('click', ()=>{
-  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false});
+  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false, accesoGraficos:false});
   dibujarUsuariosAdmin();
   setStatus('usuariosStatus', 'Escribe el usuario, ponle una clave, marca sus bodegas permitidas, y dale "💾 Guardar".', 'ok');
 });
@@ -2669,6 +2801,24 @@ function renderHistorialList(){
 }
 
 document.getElementById('refreshHistorialBtn').addEventListener('click', cargarHistorial);
+
+document.getElementById('descargarHistorialBtn').addEventListener('click', async ()=>{
+  const filtroBodega = document.getElementById('historialBodegaSelect').value;
+  const filtrado = filtroBodega ? ultimoHistorial.filter(h=>h.bodega===filtroBodega) : ultimoHistorial;
+  if(!filtrado.length){ setStatus('historialStatus', 'No hay historial para exportar con ese filtro.', 'err'); return; }
+
+  const filas = filtrado.map(h=>{
+    const fecha = new Date(h.creado_en).toLocaleString('es-CO', {dateStyle:'short', timeStyle:'short'});
+    const etiquetaTabla = h.tabla==='productos' ? 'Inventario' : 'Troncal';
+    return [fecha, h.bodega||'', etiquetaTabla, h.accion, h.nombre_registro||'', h.detalle||''];
+  });
+
+  await descargarExcelFormateado({
+    titulo: `HISTORIAL DE CAMBIOS${filtroBodega ? ' — ' + filtroBodega.toUpperCase() : ' — TODAS LAS BODEGAS'}`,
+    columnas: ['FECHA','BODEGA','TIPO','ACCIÓN','MATERIAL','DETALLE / OBSERVACIÓN'],
+    filas
+  });
+});
 document.getElementById('historialBodegaSelect').addEventListener('change', renderHistorialList);
 
 document.getElementById('clearHistorialBtn').addEventListener('click', async ()=>{
@@ -2849,7 +2999,7 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
   let html = '';
   let totalEncontrados = 0;
 
-  lineas.forEach(linea=>{
+  lineas.forEach(async linea=>{
     const palabras = palabrasClave(linea);
     if(!palabras.length) return;
 
@@ -2866,6 +3016,7 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
 
     if(!resultadosStock.length && !resultadosLog.length){
       html += '<p class="note" style="margin:0 0 8px;">No encontré nada parecido a esto en ninguna bodega.</p>';
+      try{ await sb.from('busquedas_sin_resultado').insert({texto: linea}); }catch(e){ console.error(e); }
       return;
     }
 
@@ -2933,6 +3084,7 @@ function switchTab(name){
   });
   if(name==='inventario') resincronizarPestana('inventario');
   if(name==='troncal') resincronizarPestana('troncal');
+  if(name==='graficos') renderGraficoBodegaSelect();
   window.scrollTo({top:0, behavior:'instant'});
 }
 document.querySelectorAll('.tab-btn').forEach(btn=>{
@@ -2947,12 +3099,42 @@ document.getElementById('adminGearBtn').addEventListener('click', async ()=>{
   cargarHistorial();
   renderUsuariosAdmin();
   renderComprasBodegaSelect();
+  cargarBusquedasSinResultado();
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>{ p.style.display = (p.dataset.panel==='admin') ? '' : 'none'; });
   window.scrollTo({top:0, behavior:'instant'});
 });
 
 document.getElementById('adminBackBtn').addEventListener('click', ()=>switchTab('inventario'));
+
+// ================== Búsquedas sin resultado (solo admin) ==================
+async function cargarBusquedasSinResultado(){
+  const box = document.getElementById('busquedasSinResultadoList');
+  if(!box) return;
+  box.innerHTML = '<span class="note" style="margin:0;">Cargando…</span>';
+  try{
+    const {data, error} = await sb.from('busquedas_sin_resultado').select('*').order('creado_en', {ascending:false}).limit(200);
+    if(error) throw error;
+    if(!data.length){ box.innerHTML = '<span class="note" style="margin:0;">Todavía no hay búsquedas sin resultado registradas.</span>'; return; }
+    box.innerHTML = data.map(b=>{
+      const fecha = new Date(b.creado_en).toLocaleString('es-CO', {dateStyle:'short', timeStyle:'short'});
+      return `<div style="padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;display:flex;justify-content:space-between;gap:8px;">
+        <span>"${escapeHtml(b.texto)}"</span>
+        <span style="color:var(--text-dim);font-size:11px;white-space:nowrap;">${fecha}</span>
+      </div>`;
+    }).join('');
+  }catch(e){
+    box.innerHTML = `<span class="note" style="color:var(--red);">Error: ${escapeHtml(e.message)}</span>`;
+  }
+}
+document.getElementById('refreshBusquedasBtn').addEventListener('click', cargarBusquedasSinResultado);
+document.getElementById('clearBusquedasBtn').addEventListener('click', async ()=>{
+  if(!confirm('¿Borrar TODO el registro de búsquedas sin resultado? No se puede deshacer.')) return;
+  try{
+    await sb.from('busquedas_sin_resultado').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    cargarBusquedasSinResultado();
+  }catch(e){ console.error(e); }
+});
 
 // ================== Lista de compras automática (solo admin) ==================
 function renderComprasBodegaSelect(){
@@ -3247,15 +3429,18 @@ function actualizarNavegacionSegunSesion(){
   const puedeTroncal = esAmplio || permitidas.some(n=>bodegaTieneLado(n,'troncal'));
   const puedeBuscar = esAmplio || !!(s && s.accesoBuscar);
   const puedeAlertas = esAmplio || !!(s && s.accesoAlertas);
+  const puedeGraficos = esAmplio || !!(s && s.accesoGraficos);
 
   const btnBuscar = document.querySelector('.tab-btn[data-tab="buscar"]');
   const btnInventario = document.querySelector('.tab-btn[data-tab="inventario"]');
   const btnTroncal = document.querySelector('.tab-btn[data-tab="troncal"]');
   const btnAlertas = document.querySelector('.tab-btn[data-tab="alertas"]');
+  const btnGraficos = document.querySelector('.tab-btn[data-tab="graficos"]');
   if(btnBuscar) btnBuscar.style.display = puedeBuscar ? '' : 'none';
   if(btnInventario) btnInventario.style.display = puedeInventario ? '' : 'none';
   if(btnTroncal) btnTroncal.style.display = puedeTroncal ? '' : 'none';
   if(btnAlertas) btnAlertas.style.display = puedeAlertas ? '' : 'none';
+  if(btnGraficos) btnGraficos.style.display = puedeGraficos ? '' : 'none';
 
   // Si la pestaña que estaba activa quedó oculta para este usuario, se cambia
   // sola a la primera que sí pueda ver (para no dejarlo viendo una en blanco).
