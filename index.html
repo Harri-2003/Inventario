@@ -803,6 +803,22 @@
       </div>
 
       <div class="card">
+        <h2>Lista de compras automática</h2>
+        <p class="note">
+          Junta todos los productos agotados o por acabarse y sugiere cuánto comprar de cada uno (hasta llegar al doble de su mínimo).
+          Se descarga en un Excel ordenado, listo para mandarle al proveedor.
+        </p>
+        <div class="field" style="max-width:260px;margin-bottom:12px;">
+          <label>Bodega</label>
+          <select id="comprasBodegaSelect">
+            <option value="">Todas las bodegas</option>
+          </select>
+        </div>
+        <button class="primary" id="generarListaComprasBtn">⬇ Generar lista de compras (Excel)</button>
+        <div class="status" id="comprasStatus"></div>
+      </div>
+
+      <div class="card">
         <h2>Historial de cambios</h2>
         <p class="note">Cada vez que se crea, edita o borra un producto o una entrega de troncal, queda aquí. Guardado en Supabase, no en tu navegador.</p>
         <div class="row" style="margin-bottom:12px;">
@@ -1118,6 +1134,7 @@ async function loadAll(){
   renderLogSwitcher();
   renderReporteManualBodegaSelect();
   renderEntregaCard();
+  actualizarProyecciones(currentStockBodega);
 }
 
 let realtimeDebounce = null;
@@ -1151,6 +1168,70 @@ async function reloadProductosOnly(){
 let invEditing = false;
 let invSearch = '';
 
+// ================== Alerta predictiva de agotamiento ==================
+// Se calcula a partir del historial real de cambios de cantidad (no asume
+// que se carga Excel todos los días — funciona igual si lo haces una vez
+// por semana, dos veces, o lo que sea; usa las fechas reales de cada cambio).
+let proyeccionesCache = {}; // { nombreBodega: { nombreProducto: {semanal, mensual} } }
+
+async function actualizarProyecciones(grupo){
+  const desde30 = new Date(Date.now() - 30*24*60*60*1000).toISOString();
+  try{
+    const {data, error} = await sb.from('historial')
+      .select('nombre_registro, creado_en, cantidad_anterior, cantidad_nueva')
+      .eq('tabla','productos').eq('bodega', grupo).eq('accion','editar')
+      .gte('creado_en', desde30)
+      .not('cantidad_anterior','is', null)
+      .order('creado_en', {ascending:true});
+    if(error) throw error;
+
+    const porProducto = {};
+    (data||[]).forEach(h=>{
+      (porProducto[h.nombre_registro] = porProducto[h.nombre_registro] || []).push(h);
+    });
+
+    const ahora = Date.now();
+    function calcularConsumo(lista){
+      if(!lista.length) return null;
+      let consumo = 0;
+      lista.forEach(h=>{
+        const diff = Number(h.cantidad_anterior) - Number(h.cantidad_nueva);
+        if(diff > 0) consumo += diff; // solo cuenta bajadas (consumo real); las subidas son reabastecimiento
+      });
+      if(consumo <= 0) return null;
+      const primera = new Date(lista[0].creado_en).getTime();
+      const dias = Math.max(1, (ahora - primera) / (24*60*60*1000));
+      return { consumoDiario: consumo / dias, consumoTotal: consumo, dias };
+    }
+
+    const resultado = {};
+    for(const nombre in porProducto){
+      const puntos = porProducto[nombre];
+      const semanal = puntos.filter(h => (ahora - new Date(h.creado_en).getTime()) <= 7*24*60*60*1000);
+      resultado[nombre] = {
+        semanal: calcularConsumo(semanal),
+        mensual: calcularConsumo(puntos) // ya calculado, pero por ahora no se muestra en la tabla (solo semanal)
+      };
+    }
+    proyeccionesCache[grupo] = resultado;
+  }catch(e){
+    console.error('No se pudo calcular la proyección de consumo:', e);
+    proyeccionesCache[grupo] = {};
+  }
+  if(grupo === currentStockBodega) render();
+}
+
+function proyeccionTexto(nombreProducto, grupo, qty){
+  const p = (proyeccionesCache[grupo]||{})[nombreProducto];
+  const semanal = p && p.semanal;
+  if(!semanal || semanal.consumoDiario<=0) return '';
+  const diasRestantes = qty / semanal.consumoDiario;
+  if(diasRestantes > 21) return ''; // muy lejos de agotarse, no vale la pena mostrarlo
+  const dias = Math.round(diasRestantes);
+  const clase = dias<=3 ? 'color:var(--red);' : dias<=7 ? 'color:var(--amber);' : 'color:var(--text-dim);';
+  return `<div style="font-size:10.5px;${clase}margin-top:2px;">⏳ A este ritmo se agota en ~${dias} día${dias===1?'':'s'}</div>`;
+}
+
 function render(){
   const editable = puedeEditarBodega(currentStockBodega) && invEditing;
   const tbody = document.getElementById('tbody');
@@ -1166,6 +1247,7 @@ function render(){
     tr.innerHTML = `
       <td class="name-cell" data-label="Material">
         <input type="text" value="${escapeHtml(it.name)}" ${dis} data-field="name" data-id="${it.id}" style="border:none;background:transparent;font-weight:600;padding:2px;width:70%;">
+        ${proyeccionTexto(it.name, it.grupo, it.qty)}
       </td>
       <td style="text-align:right;" data-label="Cantidad"><input class="qty" type="number" min="0" value="${it.qty}" ${dis} data-field="qty" data-id="${it.id}"></td>
       <td style="text-align:right;" data-label="Mínimo"><input class="minv" type="number" min="0" value="${it.min}" ${dis} data-field="min" data-id="${it.id}"></td>
@@ -2040,6 +2122,7 @@ function seleccionarBodega(b){
     moverBloqueA(slotId, 'stockViewBlock');
     render();
     renderEntregaCard();
+    actualizarProyecciones(b.nombre);
   } else {
     currentLogBodega = b.nombre;
     document.getElementById('logViewTitle').textContent = enInventario ? `Registro — ${b.nombre}` : 'Registro de entregas — Troncal';
@@ -2863,12 +2946,65 @@ document.getElementById('adminGearBtn').addEventListener('click', async ()=>{
   renderEntregaCard();
   cargarHistorial();
   renderUsuariosAdmin();
+  renderComprasBodegaSelect();
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>{ p.style.display = (p.dataset.panel==='admin') ? '' : 'none'; });
   window.scrollTo({top:0, behavior:'instant'});
 });
 
 document.getElementById('adminBackBtn').addEventListener('click', ()=>switchTab('inventario'));
+
+// ================== Lista de compras automática (solo admin) ==================
+function renderComprasBodegaSelect(){
+  const sel = document.getElementById('comprasBodegaSelect');
+  if(!sel) return;
+  const actual = sel.value;
+  const stockBodegas = bodegas.filter(b=>b.tipo==='stock');
+  sel.innerHTML = '<option value="">Todas las bodegas</option>' +
+    stockBodegas.map(b=>`<option value="${escapeHtml(b.nombre)}">${escapeHtml(b.nombre)}</option>`).join('');
+  sel.value = actual || '';
+}
+
+document.getElementById('generarListaComprasBtn').addEventListener('click', async ()=>{
+  if(!(await requireAdmin())) return;
+  const bodegaElegida = document.getElementById('comprasBodegaSelect').value || null;
+
+  const aComprar = items.filter(it=>
+    (!bodegaElegida || it.grupo===bodegaElegida) && it.qty <= it.min * 0.50
+  );
+
+  if(!aComprar.length){
+    setStatus('comprasStatus', 'No hay nada agotado ni por acabarse en ese filtro — nada que comprar por ahora.', 'ok');
+    return;
+  }
+
+  const filas = aComprar
+    .sort((a,b)=> (a.qty/Math.max(a.min,1)) - (b.qty/Math.max(b.min,1))) // lo más urgente primero
+    .map(it=>{
+      const estado = it.qty <= it.min*0.10 ? 'AGOTADO' : 'POR ACABARSE';
+      const sugerido = Math.max(1, Math.ceil(it.min*2 - it.qty)); // hasta llegar al doble del mínimo
+      return [it.grupo, it.name, it.qty, it.min, estado, sugerido];
+    });
+
+  setStatus('comprasStatus', 'Generando Excel...', '');
+  try{
+    await descargarExcelFormateado({
+      titulo: `LISTA DE COMPRAS${bodegaElegida ? ' — ' + bodegaElegida.toUpperCase() : ' — TODAS LAS BODEGAS'}`,
+      columnas: ['BODEGA','MATERIAL','CANTIDAD ACTUAL','MÍNIMO','ESTADO','SUGERIDO COMPRAR'],
+      filas,
+      coloresEstado: {
+        columna: 5,
+        mapa: {
+          'AGOTADO':      { fondo:'FFFCE4E4', texto:'FFB91C1C' },
+          'POR ACABARSE': { fondo:'FFFFF3D6', texto:'FF92600A' }
+        }
+      }
+    });
+    setStatus('comprasStatus', `Lista generada con ${aComprar.length} producto(s).`, 'ok');
+  }catch(e){
+    setStatus('comprasStatus', 'Error: ' + e.message, 'err');
+  }
+});
 
 // ================== Arranque ==================
 // ================== Colapsar/desplegar tablas largas ==================
