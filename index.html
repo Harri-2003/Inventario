@@ -1184,7 +1184,7 @@ function mostrarModalLogin(opciones={}){
         const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario, p_password: clave});
         if(error) throw error;
         if(!data){ setStatus('loginStatus','Usuario o clave incorrectos.','err'); ingresarBtn.disabled = false; return; }
-        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas, accesoGraficos:data.accesoGraficos, accesoPedidos:data.accesoPedidos, accesoResumen:data.accesoResumen, minutosInactividad:data.minutosInactividad};
+        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas, accesoGraficos:data.accesoGraficos, accesoPedidos:data.accesoPedidos, accesoResumen:data.accesoResumen, minutosInactividad:data.minutosInactividad, sinCierreInactividad:data.sinCierreInactividad};
         if(esElevacion){
           elevacionTemporal = sesion; // NO se guarda en sessionStorage/localStorage, solo en memoria y por un rato
         } else {
@@ -2245,8 +2245,11 @@ function dibujarUsuariosAdmin(){
           </div>
           <div class="field" style="max-width:200px;">
             <label>Minutos de inactividad</label>
-            <input type="number" min="1" value="${u.minutosInactividad||''}" data-ufield="minutosInactividad" data-uid="${u.id}" placeholder="${u.esAdmin?'vacío = 5':'vacío = 20'}">
+            <input type="number" min="1" value="${u.minutosInactividad||''}" data-ufield="minutosInactividad" data-uid="${u.id}" placeholder="${u.esAdmin?'vacío = 5':'vacío = 20'}" ${u.sinCierreInactividad?'disabled':''}>
           </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-mut);cursor:pointer;padding-bottom:9px;">
+            <input type="checkbox" data-ufield="sinCierreInactividad" data-uid="${u.id}" ${u.sinCierreInactividad?'checked':''}> No cerrar por inactividad
+          </label>
           <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);cursor:pointer;padding-bottom:9px;">
             <input type="checkbox" data-ufield="esAdmin" data-uid="${u.id}" ${u.esAdmin?'checked':''}> Administrador (acceso total)
           </label>
@@ -2310,7 +2313,7 @@ function dibujarUsuariosAdmin(){
         u[field] = e.target.value ? parseInt(e.target.value) : null;
       } else {
         u[field] = e.target.checked;
-        if(field==='esAdmin') dibujarUsuariosAdmin(); // refresca para des/habilitar lo que no aplica a admins
+        if(field==='esAdmin' || field==='sinCierreInactividad') dibujarUsuariosAdmin(); // refresca para des/habilitar campos relacionados
       }
     });
   });
@@ -2351,7 +2354,8 @@ function dibujarUsuariosAdmin(){
           p_solo_lectura: !!u.soloLectura, p_puede_cargar_excel: !!u.puedeCargarExcel,
           p_acceso_buscar: !!u.accesoBuscar, p_acceso_alertas: !!u.accesoAlertas, p_acceso_graficos: !!u.accesoGraficos,
           p_acceso_pedidos: !!u.accesoPedidos, p_acceso_resumen: !!u.accesoResumen,
-          p_minutos_inactividad: u.minutosInactividad || null
+          p_minutos_inactividad: u.minutosInactividad || null,
+          p_sin_cierre_inactividad: !!u.sinCierreInactividad
         });
         if(error) throw error;
         setStatus('usuariosStatus', `Usuario "${u.username}" guardado.`, 'ok');
@@ -2381,7 +2385,7 @@ function dibujarUsuariosAdmin(){
 }
 
 document.getElementById('addUsuarioBtn').addEventListener('click', ()=>{
-  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false, accesoGraficos:false, accesoPedidos:false, accesoResumen:false, minutosInactividad:null});
+  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false, accesoGraficos:false, accesoPedidos:false, accesoResumen:false, minutosInactividad:null, sinCierreInactividad:false});
   dibujarUsuariosAdmin();
   setStatus('usuariosStatus', 'Escribe el usuario, ponle una clave, marca sus bodegas permitidas, y dale "<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h6"/></svg> Guardar".', 'ok');
 });
@@ -4239,7 +4243,7 @@ setInterval(()=>{
 
   // Sesión real: se cierra según lo configurado para ese usuario
   const s = getSession();
-  if(s){
+  if(s && !s.sinCierreInactividad){
     const limite = s.minutosInactividad || (s.esAdmin ? 5 : 20);
     if(minutosInactivo >= limite){
       clearSession();
