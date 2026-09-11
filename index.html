@@ -505,7 +505,10 @@
       </div>
 
       <div class="card" id="entregaCard" style="display:none;">
-        <h2>Registrar entrega</h2>
+        <h2 style="justify-content:space-between;">
+          <span>Registrar entrega</span>
+          <button id="habilitarEntregaBtn" style="font-size:11px;padding:6px 11px;display:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"/></svg> Habilitar edición</button>
+        </h2>
         <p class="note">Elige el producto, cuánto se entrega y a quién. Se descuenta solo de esta bodega y queda guardado con tu observación — no hace falta calcular nada a mano.</p>
         <div class="row">
           <div class="field">
@@ -1205,9 +1208,9 @@ async function requireAdmin(){
 async function requireEditBodega(nombreBodega){
   if(puedeEditarBodega(nombreBodega) || puedeSoloComentar(nombreBodega)) return true;
   if(getSession()){
-    // Ya hay una sesión real, pero no tiene permiso para esto — se ofrece un
-    // desbloqueo TEMPORAL con otro usuario, sin tocar la sesión actual.
-    if(!confirm(`Tu usuario no tiene permiso para editar "${nombreBodega}".\n\n¿Quieres desbloquearlo por esta vez con otro usuario (ej. admin)? Al terminar y guardar, vuelve a quedar como estaba.`)) return false;
+    // Ya hay una sesión real, pero no tiene permiso para esto — se abre
+    // directo el desbloqueo TEMPORAL con otro usuario, sin tocar la sesión
+    // actual y sin preguntas de más en el medio.
     if(!(await mostrarModalLogin({elevacion:true}))) return false;
     if(!puedeEditarBodega(nombreBodega) && !puedeSoloComentar(nombreBodega)){
       elevacionTemporal = null;
@@ -1765,12 +1768,21 @@ function renderEntregaProductoOptions(){
   if(!b || !b.registraEntregas){ card.style.display = 'none'; return; }
   card.style.display = '';
 
+  const habilitarBtn = document.getElementById('habilitarEntregaBtn');
+  if(habilitarBtn) habilitarBtn.style.display = puedeEditarBodega(currentStockBodega) ? 'none' : '';
+
   const sel = document.getElementById('entregaProducto');
   const enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
   const actual = sel.value;
   sel.innerHTML = enEstaBodega.map(it=>`<option value="${escapeHtml(it.name)}">${escapeHtml(it.name)} (hay ${it.qty})</option>`).join('');
   if(actual && enEstaBodega.some(it=>it.name===actual)) sel.value = actual;
 }
+
+document.getElementById('habilitarEntregaBtn').addEventListener('click', async ()=>{
+  if(!(await requireEditBodega(currentStockBodega))) return;
+  renderEntregaProductoOptions();
+  setStatus('entregaStatus', 'Edición habilitada para esta bodega. Ya puedes registrar la entrega.', 'ok');
+});
 
 // Completa: además trae de Supabase el listado de entregas recientes. Se usa
 // al entrar/cambiar de bodega, no en cada tecla (para no golpear la red de más).
