@@ -1109,6 +1109,12 @@ function puedeEditarBodega(nombreBodega){
 function puedeRegistrarEntregaFn(nombreBodega){
   return _puedeEditarSesion(getSession(), nombreBodega) || _elevacionSirvePara(nombreBodega, 'entrega');
 }
+// ¿El permiso actual para esta bodega viene de un desbloqueo temporal (no de
+// la sesión real)? Sirve para saber cuándo mostrar el botón de "Cerrar acceso".
+function esPermisoPorElevacion(nombreBodega, alcance){
+  if(_puedeEditarSesion(getSession(), nombreBodega)) return false; // ya tenía permiso real, no es elevación
+  return _elevacionSirvePara(nombreBodega, alcance);
+}
 function puedeSoloComentar(nombreBodega){
   return _puedeComentarSesion(getSession(), nombreBodega) || _puedeComentarSesion(elevacionTemporal, nombreBodega);
 }
@@ -1795,7 +1801,23 @@ function renderEntregaProductoOptions(){
   card.style.display = '';
 
   const habilitarBtn = document.getElementById('habilitarEntregaBtn');
-  if(habilitarBtn) habilitarBtn.style.display = puedeRegistrarEntregaFn(currentStockBodega) ? 'none' : '';
+  if(habilitarBtn){
+    const iconoCandado = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"/></svg>';
+    if(esPermisoPorElevacion(currentStockBodega, 'entrega')){
+      // Está desbloqueado por una elevación temporal (no por permiso real):
+      // se ofrece un botón explícito para cerrarlo cuando quiera, sin esperar
+      // a que se cierre solo.
+      habilitarBtn.style.display = '';
+      habilitarBtn.innerHTML = iconoCandado + ' Cerrar acceso';
+      habilitarBtn.dataset.modo = 'cerrar';
+    } else if(puedeRegistrarEntregaFn(currentStockBodega)){
+      habilitarBtn.style.display = 'none'; // ya tiene permiso real, no hace falta botón
+    } else {
+      habilitarBtn.style.display = '';
+      habilitarBtn.innerHTML = iconoCandado + ' Habilitar edición';
+      habilitarBtn.dataset.modo = 'habilitar';
+    }
+  }
 
   const sel = document.getElementById('entregaProducto');
   const enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
@@ -1805,6 +1827,12 @@ function renderEntregaProductoOptions(){
 }
 
 document.getElementById('habilitarEntregaBtn').addEventListener('click', async ()=>{
+  if(document.getElementById('habilitarEntregaBtn').dataset.modo === 'cerrar'){
+    elevacionTemporal = null;
+    renderEntregaProductoOptions();
+    setStatus('entregaStatus', 'Acceso cerrado. Ya no se pueden registrar más entregas hasta desbloquear de nuevo.', 'ok');
+    return;
+  }
   if(!(await requireEditBodega(currentStockBodega, 'entrega'))) return;
   renderEntregaProductoOptions();
   setStatus('entregaStatus', 'Puedes registrar la entrega — el resto del inventario sigue sin poder editarse.', 'ok');
@@ -1896,7 +1924,6 @@ document.getElementById('registrarEntregaBtn').addEventListener('click', async (
   document.getElementById('entregaA').value = '';
   document.getElementById('entregaObservacion').value = '';
   setStatus('entregaStatus', `Entrega registrada: ${cantidad} de "${nombreProducto}" a ${entregadoA}. Quedan ${item.qty}.`, 'ok');
-  if(!invEditing) elevacionTemporal = null; // si fue un desbloqueo puntual solo para esta entrega, se cierra solo
 });
 
 document.getElementById('invEditBtn').addEventListener('click', async ()=>{
