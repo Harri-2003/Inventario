@@ -1115,10 +1115,16 @@ function mostrarModalLogin(opciones={}){
     const subtitulo = document.getElementById('loginSubtitulo');
 
     if(subtitulo) subtitulo.textContent = esElevacion
-      ? 'Desbloqueo temporal — inicia con un usuario que sí tenga permiso'
+      ? 'Escribe la clave de administrador para desbloquear'
       : 'Inicia sesión para continuar';
 
-    if(ultimoUsuario){
+    if(esElevacion){
+      // Desbloqueo rápido: no pide usuario, asume "admin" y solo pide la clave
+      // (se valida en vivo contra la base de datos, así que si cambias la
+      // clave del admin más adelante, esto sigue funcionando solo).
+      bienvenida.style.display = 'none';
+      camposUsuario.style.display = 'none';
+    } else if(ultimoUsuario){
       bienvenida.style.display = '';
       camposUsuario.style.display = 'none';
       document.getElementById('loginNombreGuardado').textContent = ultimoUsuario;
@@ -1148,10 +1154,10 @@ function mostrarModalLogin(opciones={}){
 
     async function onIngresar(){
       const usandoGuardado = ultimoUsuario && camposUsuario.style.display === 'none';
-      const usuario = usandoGuardado ? ultimoUsuario : document.getElementById('loginUsuario').value.trim();
+      const usuario = esElevacion ? 'admin' : (usandoGuardado ? ultimoUsuario : document.getElementById('loginUsuario').value.trim());
       const clave = claveInput.value;
       const recordar = document.getElementById('loginRecordar').checked;
-      if(!usuario || !clave){ setStatus('loginStatus','Escribe usuario y clave.','err'); return; }
+      if(!usuario || !clave){ setStatus('loginStatus', esElevacion ? 'Escribe la clave.' : 'Escribe usuario y clave.','err'); return; }
       ingresarBtn.disabled = true;
       try{
         const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario, p_password: clave});
