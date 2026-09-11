@@ -1184,7 +1184,7 @@ function mostrarModalLogin(opciones={}){
         const {data, error} = await sb.rpc('validar_usuario', {p_username: usuario, p_password: clave});
         if(error) throw error;
         if(!data){ setStatus('loginStatus','Usuario o clave incorrectos.','err'); ingresarBtn.disabled = false; return; }
-        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas, accesoGraficos:data.accesoGraficos, accesoPedidos:data.accesoPedidos, accesoResumen:data.accesoResumen};
+        const sesion = {username:data.username, password:clave, esAdmin:data.esAdmin, bodegasPermitidas:data.bodegasPermitidas||[], puedeCrearBodegas:data.puedeCrearBodegas, soloComentario:data.soloComentario, soloLectura:data.soloLectura, puedeCargarExcel:data.puedeCargarExcel, accesoBuscar:data.accesoBuscar, accesoAlertas:data.accesoAlertas, accesoGraficos:data.accesoGraficos, accesoPedidos:data.accesoPedidos, accesoResumen:data.accesoResumen, minutosInactividad:data.minutosInactividad};
         if(esElevacion){
           elevacionTemporal = sesion; // NO se guarda en sessionStorage/localStorage, solo en memoria y por un rato
         } else {
@@ -2243,6 +2243,10 @@ function dibujarUsuariosAdmin(){
             <label>Clave nueva</label>
             <input type="password" placeholder="(sin cambios)" data-ufield="clave" data-uid="${u.id}">
           </div>
+          <div class="field" style="max-width:200px;">
+            <label>Minutos de inactividad</label>
+            <input type="number" min="1" value="${u.minutosInactividad||''}" data-ufield="minutosInactividad" data-uid="${u.id}" placeholder="${u.esAdmin?'vacío = 5':'vacío = 20'}">
+          </div>
           <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text);cursor:pointer;padding-bottom:9px;">
             <input type="checkbox" data-ufield="esAdmin" data-uid="${u.id}" ${u.esAdmin?'checked':''}> Administrador (acceso total)
           </label>
@@ -2302,6 +2306,8 @@ function dibujarUsuariosAdmin(){
       const field = e.target.dataset.ufield;
       if(field==='clave' || field==='username'){
         u[field] = e.target.value;
+      } else if(field==='minutosInactividad'){
+        u[field] = e.target.value ? parseInt(e.target.value) : null;
       } else {
         u[field] = e.target.checked;
         if(field==='esAdmin') dibujarUsuariosAdmin(); // refresca para des/habilitar lo que no aplica a admins
@@ -2344,7 +2350,8 @@ function dibujarUsuariosAdmin(){
           p_puede_crear_bodegas: !!u.puedeCrearBodegas, p_solo_comentario: !!u.soloComentario,
           p_solo_lectura: !!u.soloLectura, p_puede_cargar_excel: !!u.puedeCargarExcel,
           p_acceso_buscar: !!u.accesoBuscar, p_acceso_alertas: !!u.accesoAlertas, p_acceso_graficos: !!u.accesoGraficos,
-          p_acceso_pedidos: !!u.accesoPedidos, p_acceso_resumen: !!u.accesoResumen
+          p_acceso_pedidos: !!u.accesoPedidos, p_acceso_resumen: !!u.accesoResumen,
+          p_minutos_inactividad: u.minutosInactividad || null
         });
         if(error) throw error;
         setStatus('usuariosStatus', `Usuario "${u.username}" guardado.`, 'ok');
@@ -2374,7 +2381,7 @@ function dibujarUsuariosAdmin(){
 }
 
 document.getElementById('addUsuarioBtn').addEventListener('click', ()=>{
-  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false, accesoGraficos:false, accesoPedidos:false, accesoResumen:false});
+  usuariosApp.push({id:null, username:'', clave:'', esAdmin:false, bodegasPermitidas:[], puedeCrearBodegas:false, soloComentario:false, soloLectura:false, puedeCargarExcel:false, accesoBuscar:false, accesoAlertas:false, accesoGraficos:false, accesoPedidos:false, accesoResumen:false, minutosInactividad:null});
   dibujarUsuariosAdmin();
   setStatus('usuariosStatus', 'Escribe el usuario, ponle una clave, marca sus bodegas permitidas, y dale "<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h6"/></svg> Guardar".', 'ok');
 });
@@ -4209,6 +4216,39 @@ document.getElementById('logoutBtn').addEventListener('click', ()=>{
 });
 
 // ================== Arranque: pide iniciar sesión antes de mostrar nada ==================
+// ================== Cierre automático por inactividad ==================
+// Cada usuario puede tener sus propios minutos configurados (Gestionar
+// usuarios). Si no tiene nada configurado: admin = 5 min, los demás = 20 min.
+// La elevación temporal (desbloqueo con clave de admin) siempre usa 5 min
+// fijos, sin importar nada más, por seguridad extra.
+let ultimaActividad = Date.now();
+['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(ev=>{
+  document.addEventListener(ev, ()=>{ ultimaActividad = Date.now(); }, {passive:true});
+});
+
+setInterval(()=>{
+  const minutosInactivo = (Date.now() - ultimaActividad) / 60000;
+
+  // La elevación temporal se cierra sola primero, siempre a los 5 minutos
+  if(elevacionTemporal && minutosInactivo >= 5){
+    elevacionTemporal = null;
+    render();
+    renderTroncal();
+    renderEntregaCard();
+  }
+
+  // Sesión real: se cierra según lo configurado para ese usuario
+  const s = getSession();
+  if(s){
+    const limite = s.minutosInactividad || (s.esAdmin ? 5 : 20);
+    if(minutosInactivo >= limite){
+      clearSession();
+      elevacionTemporal = null;
+      location.reload(); // la app ya exige sesión siempre, así que esto vuelve a pedir login
+    }
+  }
+}, 15000); // revisa cada 15 segundos
+
 async function iniciarApp(){
   while(!getSession()){
     await mostrarModalLogin();
