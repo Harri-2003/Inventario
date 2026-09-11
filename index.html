@@ -1073,6 +1073,11 @@ function puedeVerBodega(nombreBodega){
 // (ej. admin) para una sola acción de edición, sin que tu sesión real
 // cambie. Al terminar (guardar/cerrar), esto se limpia solo y vuelves a
 // quedar exactamente como estabas.
+//
+// Tiene un "alcance": una elevación pedida solo para "Registrar entrega"
+// NO destraba la tabla completa de Inventario (mínimos, cantidades a mano)
+// — quedan aisladas. Una elevación pedida para la tabla completa sí sirve
+// también para registrar entregas (es un permiso más amplio).
 let elevacionTemporal = null;
 
 function _puedeEditarSesion(s, nombreBodega){
@@ -1090,9 +1095,19 @@ function _puedeCargarExcelSesion(s, nombreBodega){
   if(s.esAdmin) return true;
   return !!s.puedeCargarExcel && tieneAccesoABodega(s, nombreBodega);
 }
+// Revisa la elevación temporal respetando su alcance: si se pidió solo para
+// "entrega", no cuenta para revisar permiso de "tabla" (más amplio).
+function _elevacionSirvePara(nombreBodega, alcanceRequerido){
+  if(!elevacionTemporal || elevacionTemporal._bodegaElevada !== nombreBodega) return false;
+  if(alcanceRequerido === 'tabla' && elevacionTemporal._alcance !== 'tabla') return false;
+  return _puedeEditarSesion(elevacionTemporal, nombreBodega);
+}
 
 function puedeEditarBodega(nombreBodega){
-  return _puedeEditarSesion(getSession(), nombreBodega) || _puedeEditarSesion(elevacionTemporal, nombreBodega);
+  return _puedeEditarSesion(getSession(), nombreBodega) || _elevacionSirvePara(nombreBodega, 'tabla');
+}
+function puedeRegistrarEntregaFn(nombreBodega){
+  return _puedeEditarSesion(getSession(), nombreBodega) || _elevacionSirvePara(nombreBodega, 'entrega');
 }
 function puedeSoloComentar(nombreBodega){
   return _puedeComentarSesion(getSession(), nombreBodega) || _puedeComentarSesion(elevacionTemporal, nombreBodega);
@@ -1211,19 +1226,24 @@ async function requireAdmin(){
 }
 
 // Para el botón "Editar" de una bodega puntual (Inventario o Troncal)
-async function requireEditBodega(nombreBodega){
-  if(puedeEditarBodega(nombreBodega) || puedeSoloComentar(nombreBodega)) return true;
+async function requireEditBodega(nombreBodega, alcance='tabla'){
+  const puedeYa = alcance==='entrega' ? puedeRegistrarEntregaFn(nombreBodega) : puedeEditarBodega(nombreBodega);
+  if(puedeYa || puedeSoloComentar(nombreBodega)) return true;
   if(getSession()){
     // Ya hay una sesión real, pero no tiene permiso para esto — se abre
     // directo el desbloqueo TEMPORAL con otro usuario, sin tocar la sesión
     // actual y sin preguntas de más en el medio.
     if(!(await mostrarModalLogin({elevacion:true}))) return false;
-    if(!puedeEditarBodega(nombreBodega) && !puedeSoloComentar(nombreBodega)){
+    if(elevacionTemporal){
+      elevacionTemporal._bodegaElevada = nombreBodega;
+      elevacionTemporal._alcance = alcance; // 'entrega' queda aislado, no destraba la tabla completa
+    }
+    const quedoDesbloqueado = alcance==='entrega' ? puedeRegistrarEntregaFn(nombreBodega) : puedeEditarBodega(nombreBodega);
+    if(!quedoDesbloqueado && !puedeSoloComentar(nombreBodega)){
       elevacionTemporal = null;
       alert('Ese usuario tampoco tiene permiso para editar esta bodega.');
       return false;
     }
-    if(elevacionTemporal) elevacionTemporal._bodegaElevada = nombreBodega;
     return true;
   }
   if(!(await iniciarSesion())) return false;
@@ -1775,7 +1795,7 @@ function renderEntregaProductoOptions(){
   card.style.display = '';
 
   const habilitarBtn = document.getElementById('habilitarEntregaBtn');
-  if(habilitarBtn) habilitarBtn.style.display = puedeEditarBodega(currentStockBodega) ? 'none' : '';
+  if(habilitarBtn) habilitarBtn.style.display = puedeRegistrarEntregaFn(currentStockBodega) ? 'none' : '';
 
   const sel = document.getElementById('entregaProducto');
   const enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
@@ -1785,9 +1805,9 @@ function renderEntregaProductoOptions(){
 }
 
 document.getElementById('habilitarEntregaBtn').addEventListener('click', async ()=>{
-  if(!(await requireEditBodega(currentStockBodega))) return;
+  if(!(await requireEditBodega(currentStockBodega, 'entrega'))) return;
   renderEntregaProductoOptions();
-  setStatus('entregaStatus', 'Edición habilitada para esta bodega. Ya puedes registrar la entrega.', 'ok');
+  setStatus('entregaStatus', 'Puedes registrar la entrega — el resto del inventario sigue sin poder editarse.', 'ok');
 });
 
 // Completa: además trae de Supabase el listado de entregas recientes. Se usa
@@ -1842,7 +1862,7 @@ async function renderEntregaCard(){
 }
 
 document.getElementById('registrarEntregaBtn').addEventListener('click', async ()=>{
-  if(!(await requireEditBodega(currentStockBodega))) return;
+  if(!(await requireEditBodega(currentStockBodega, 'entrega'))) return;
 
   const nombreProducto = document.getElementById('entregaProducto').value;
   const cantidad = parseFloat(document.getElementById('entregaCantidad').value);
@@ -1888,7 +1908,7 @@ document.getElementById('invEditBtn').addEventListener('click', async ()=>{
     setStatus('uploadStatus','Cambios guardados. Edición cerrada.','ok');
     return;
   }
-  if(!(await requireEditBodega(currentStockBodega))) return;
+  if(!(await requireEditBodega(currentStockBodega, 'tabla'))) return;
   invEditing = true;
   render();
   renderEntregaCard();
@@ -2991,7 +3011,7 @@ document.getElementById('troncalEditBtn').addEventListener('click', async ()=>{
     setStatus('troncalAlertStatus','Cambios guardados. Edición cerrada.','ok');
     return;
   }
-  if(!(await requireEditBodega(currentLogBodega))) return;
+  if(!(await requireEditBodega(currentLogBodega, 'tabla'))) return;
   troncalEditing = true;
   renderTroncal();
 });
