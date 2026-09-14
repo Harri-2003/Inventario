@@ -4283,11 +4283,12 @@ document.getElementById('logoutBtn').addEventListener('click', ()=>{
 // La elevación temporal (desbloqueo con clave de admin) siempre usa 5 min
 // fijos, sin importar nada más, por seguridad extra.
 let ultimaActividad = Date.now();
+let ultimaRevalidacion = 0;
 ['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(ev=>{
   document.addEventListener(ev, ()=>{ ultimaActividad = Date.now(); }, {passive:true});
 });
 
-setInterval(()=>{
+setInterval(async ()=>{
   const minutosInactivo = (Date.now() - ultimaActividad) / 60000;
 
   // La elevación temporal se cierra sola primero, siempre a los 5 minutos
@@ -4298,10 +4299,38 @@ setInterval(()=>{
     renderEntregaCard();
   }
 
-  // Sesión real: se cierra según lo configurado para ese usuario
   const s = getSession();
-  if(s && !s.sinCierreInactividad){
-    const limite = s.minutosInactividad || (s.esAdmin ? 5 : 20);
+  if(!s) return;
+
+  // Cada 2 minutos, revalida en silencio contra la base de datos: si un
+  // admin cambió el permiso de "no cerrar por inactividad" (o los minutos,
+  // o cualquier otro permiso) MIENTRAS la persona seguía conectada, esto lo
+  // aplica solo, sin que tenga que cerrar sesión y volver a entrar.
+  if(Date.now() - ultimaRevalidacion > 2*60000){
+    ultimaRevalidacion = Date.now();
+    try{
+      const {data} = await sb.rpc('validar_usuario', {p_username: s.username, p_password: s.password});
+      if(data){
+        const sesionActualizada = {...s, ...data, username: s.username, password: s.password};
+        setSession(sesionActualizada);
+        if(localStorage.getItem('sesion-recordada')) localStorage.setItem('sesion-recordada', JSON.stringify(sesionActualizada));
+        actualizarNavegacionSegunSesion();
+      } else {
+        // El usuario ya no existe o le cambiaron la clave desde otro lado —
+        // se cierra de inmediato, no hace falta esperar a la inactividad.
+        clearSession();
+        elevacionTemporal = null;
+        location.reload();
+        return;
+      }
+    }catch(e){ /* si falla la revalidación por red, se sigue usando lo que ya había en memoria */ }
+  }
+
+  // Sesión real: se cierra según lo configurado para ese usuario (ya con
+  // los datos frescos de arriba, si se acaban de revalidar)
+  const sFresca = getSession();
+  if(sFresca && !sFresca.sinCierreInactividad){
+    const limite = sFresca.minutosInactividad || (sFresca.esAdmin ? 5 : 20);
     if(minutosInactivo >= limite){
       clearSession();
       elevacionTemporal = null;
