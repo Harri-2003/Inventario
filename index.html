@@ -866,13 +866,20 @@
 
       <div class="card">
         <h2>Alerta programada</h2>
-        <p class="note">Envía el reporte completo automáticamente un día y hora específicos, sin que nadie abra nada. Puedes apuntarla a una bodega en concreto, o a todas.</p>
+        <p class="note">Envía el reporte automáticamente un día y hora específicos, sin que nadie abra nada. Puedes apuntarla a una bodega en concreto, o a todas, y elegir si va el reporte completo o solo lo crítico.</p>
         <div id="scheduleList" style="margin-bottom:12px;"></div>
         <div class="row">
           <div class="field">
             <label>Bodega</label>
             <select id="schBodega">
               <option value="">Todas las bodegas</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Tipo de reporte</label>
+            <select id="schTipo">
+              <option value="completo">Stock completo</option>
+              <option value="critico">Solo agotados y por acabarse</option>
             </select>
           </div>
           <div class="field">
@@ -1311,7 +1318,7 @@ async function loadAll(){
     items = (prod.data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
     permitidos = (perm.data||[]).map(r=>({id:r.id, nombre:r.nombre_exacto, etiqueta:r.etiqueta, min:Number(r.minimo_defecto), grupo:r.grupo}));
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
-    schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo, bodega:r.bodega}));
+    schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo, bodega:r.bodega, tipo:r.tipo_reporte||'completo'}));
     troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal', tipoMaterial:r.tipo_material||'carrete'}));
     bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, registraEntregas:r.registra_entregas, orden:r.orden}));
     if(!bodegas.some(b=>b.nombre===currentStockBodega && b.tipo==='stock')){
@@ -1624,41 +1631,90 @@ document.getElementById('graficoBodegaSelect').addEventListener('change', render
 
 // Dibuja una gráfica de línea sencilla en SVG, sin depender de ninguna
 // librería externa (mantiene la app liviana).
-function generarGraficoSVG(puntos){
+function generarGraficoSVG(puntos, minimo){
   if(puntos.length < 2){
     return '<p class="note" style="margin:0;">Todavía no hay suficientes datos en el historial para graficar este producto (se necesitan al menos 2 cambios de cantidad registrados).</p>';
   }
-  const ancho = 680, alto = 280;
-  const margen = {top:20, right:20, bottom:34, left:44};
+  const ancho = 700, alto = 320;
+  const margen = {top:24, right:24, bottom:38, left:48};
   const w = ancho - margen.left - margen.right;
   const h = alto - margen.top - margen.bottom;
   const valores = puntos.map(p=>p.valor);
   const minV = 0;
-  const maxV = Math.max(...valores) * 1.15 || 1;
+  const maxV = Math.max(...valores, minimo||0) * 1.2 || 1;
   const minT = puntos[0].fecha.getTime();
   const maxT = puntos[puntos.length-1].fecha.getTime();
   const rangoT = Math.max(1, maxT - minT);
 
-  const coords = puntos.map(p=>{
-    const x = margen.left + ((p.fecha.getTime()-minT)/rangoT)*w;
-    const y = margen.top + h - ((p.valor-minV)/(maxV-minV))*h;
-    return [x,y];
-  });
-  const pathD = coords.map((c,i)=> (i===0?'M':'L') + c[0].toFixed(1) + ',' + c[1].toFixed(1)).join(' ');
-  const puntosSvg = coords.map(([x,y])=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="var(--cyan)"/>`).join('');
-  const fmt = d => d.toLocaleDateString('es-CO', {day:'2-digit', month:'short'});
+  const xDe = t => margen.left + ((t-minT)/rangoT)*w;
+  const yDe = v => margen.top + h - ((v-minV)/(maxV-minV))*h;
+
+  const coords = puntos.map(p=>[xDe(p.fecha.getTime()), yDe(p.valor)]);
+  const pathLinea = coords.map((c,i)=> (i===0?'M':'L') + c[0].toFixed(1) + ',' + c[1].toFixed(1)).join(' ');
+  const pathArea = pathLinea + ` L${coords[coords.length-1][0].toFixed(1)},${(margen.top+h).toFixed(1)} L${coords[0][0].toFixed(1)},${(margen.top+h).toFixed(1)} Z`;
+
+  // Cuadrícula horizontal: 4 franjas con su valor, para leer el gráfico de un vistazo
+  const franjas = 4;
+  const lineasGrid = Array.from({length:franjas+1}, (_,i)=>{
+    const valor = (maxV/franjas)*i;
+    const y = yDe(valor);
+    return `
+      <line x1="${margen.left}" y1="${y.toFixed(1)}" x2="${margen.left+w}" y2="${y.toFixed(1)}" stroke="var(--line-soft)" stroke-width="1"/>
+      <text x="${margen.left-8}" y="${(y+3.5).toFixed(1)}" font-size="10.5" fill="var(--text-dim)" text-anchor="end">${Math.round(valor)}</text>
+    `;
+  }).join('');
+
+  // Línea de referencia del mínimo configurado, para ver de un vistazo cuándo se cruza
+  let lineaMinimo = '';
+  if(minimo && minimo > 0 && minimo <= maxV){
+    const yMin = yDe(minimo);
+    lineaMinimo = `
+      <line x1="${margen.left}" y1="${yMin.toFixed(1)}" x2="${margen.left+w}" y2="${yMin.toFixed(1)}" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="5,4"/>
+      <text x="${margen.left+w}" y="${(yMin-5).toFixed(1)}" font-size="10.5" fill="var(--amber)" text-anchor="end">Mínimo (${minimo})</text>
+    `;
+  }
+
+  // Puntos con tooltip nativo (aparece al pasar el mouse, sin código extra)
+  const fmtCorta = d => d.toLocaleDateString('es-CO', {day:'2-digit', month:'short'});
+  const fmtLarga = d => d.toLocaleDateString('es-CO', {day:'2-digit', month:'short', year:'numeric'});
+  const puntosSvg = coords.map(([x,y], i)=>{
+    const p = puntos[i];
+    const debajoDelMinimo = minimo && p.valor <= minimo;
+    return `
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${debajoDelMinimo ? 'var(--red)' : 'var(--cyan)'}" stroke="var(--bg)" stroke-width="1.5">
+        <title>${fmtLarga(p.fecha)}: ${p.valor} unidades</title>
+      </circle>
+    `;
+  }).join('');
+
+  // Resumen en texto plano, para quien no quiera interpretar el gráfico visualmente
+  const primero = puntos[0].valor, ultimo = puntos[puntos.length-1].valor;
+  const diferencia = ultimo - primero;
+  const dias = Math.max(1, Math.round((maxT-minT)/(24*60*60*1000)));
+  const tendenciaTxt = diferencia === 0
+    ? `Se mantuvo estable en ${ultimo} unidades en los últimos ${dias} día(s).`
+    : diferencia < 0
+      ? `Bajó de ${primero} a ${ultimo} unidades (${diferencia}) en los últimos ${dias} día(s).`
+      : `Subió de ${primero} a ${ultimo} unidades (+${diferencia}) en los últimos ${dias} día(s).`;
 
   return `
-    <svg viewBox="0 0 ${ancho} ${alto}" style="width:100%;height:auto;max-width:680px;">
-      <line x1="${margen.left}" y1="${margen.top}" x2="${margen.left}" y2="${margen.top+h}" stroke="var(--line)"/>
-      <line x1="${margen.left}" y1="${margen.top+h}" x2="${margen.left+w}" y2="${margen.top+h}" stroke="var(--line)"/>
-      <path d="${pathD}" fill="none" stroke="var(--cyan)" stroke-width="2"/>
+    <svg viewBox="0 0 ${ancho} ${alto}" style="width:100%;height:auto;max-width:700px;">
+      <defs>
+        <linearGradient id="gradienteArea" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--cyan)" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="var(--cyan)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      ${lineasGrid}
+      ${lineaMinimo}
+      <path d="${pathArea}" fill="url(#gradienteArea)"/>
+      <path d="${pathLinea}" fill="none" stroke="var(--cyan)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
       ${puntosSvg}
-      <text x="${margen.left}" y="${alto-8}" font-size="10.5" fill="var(--text-dim)">${fmt(puntos[0].fecha)}</text>
-      <text x="${margen.left+w}" y="${alto-8}" font-size="10.5" fill="var(--text-dim)" text-anchor="end">${fmt(puntos[puntos.length-1].fecha)}</text>
-      <text x="${margen.left-6}" y="${margen.top+4}" font-size="10.5" fill="var(--text-dim)" text-anchor="end">${Math.round(maxV)}</text>
-      <text x="${margen.left-6}" y="${margen.top+h}" font-size="10.5" fill="var(--text-dim)" text-anchor="end">0</text>
+      <line x1="${margen.left}" y1="${margen.top+h}" x2="${margen.left+w}" y2="${margen.top+h}" stroke="var(--line)"/>
+      <text x="${margen.left}" y="${alto-10}" font-size="11" fill="var(--text-dim)">${fmtCorta(puntos[0].fecha)}</text>
+      <text x="${margen.left+w}" y="${alto-10}" font-size="11" fill="var(--text-dim)" text-anchor="end">${fmtCorta(puntos[puntos.length-1].fecha)}</text>
     </svg>
+    <p class="note" style="margin:10px 0 0;">${tendenciaTxt}${minimo?` Mínimo configurado: ${minimo}.`:''}</p>
   `;
 }
 
@@ -1682,7 +1738,7 @@ document.getElementById('verGraficoBtn').addEventListener('click', async ()=>{
     const itemActual = items.find(it=>it.grupo===bodega && it.name===producto);
     if(itemActual) puntos.push({fecha:new Date(), valor:itemActual.qty});
 
-    box.innerHTML = `<p style="font-weight:600;margin-bottom:10px;">${escapeHtml(producto)} — ${escapeHtml(bodega)}</p>` + generarGraficoSVG(puntos);
+    box.innerHTML = `<p style="font-weight:600;margin-bottom:10px;">${escapeHtml(producto)} — ${escapeHtml(bodega)}</p>` + generarGraficoSVG(puntos, itemActual ? itemActual.min : null);
   }catch(e){
     box.innerHTML = `<p class="note" style="margin:0;color:var(--red);">Error: ${escapeHtml(e.message)}</p>`;
   }
@@ -2910,7 +2966,7 @@ function renderSchedules(){
   if(!schedules.length){ box.innerHTML = '<span class="note" style="margin:0;">No hay alertas programadas todavía.</span>'; return; }
   box.innerHTML = schedules.map(s=>`
     <span class="badge ${s.activo?'ok':'warn'}" style="margin:3px 6px 3px 0;display:inline-flex;align-items:center;gap:6px;">
-      ${s.bodega ? escapeHtml(s.bodega) : 'Todas'} · ${DIAS[s.dia]} ${String(s.hora).padStart(2,'0')}:${String(s.minuto).padStart(2,'0')}
+      ${s.bodega ? escapeHtml(s.bodega) : 'Todas'} · ${DIAS[s.dia]} ${String(s.hora).padStart(2,'0')}:${String(s.minuto).padStart(2,'0')} · ${s.tipo==='critico'?'Solo crítico':'Completo'}
       <button class="del" data-remove-sched="${s.id}" style="padding:0;font-size:13px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </span>
   `).join('');
@@ -2926,15 +2982,16 @@ function renderSchedules(){
 
 document.getElementById('addScheduleBtn').addEventListener('click', async ()=>{
   const bodega = document.getElementById('schBodega').value || null;
+  const tipo = document.getElementById('schTipo').value;
   const dia = parseInt(document.getElementById('schDay').value);
   const hora = parseInt(document.getElementById('schHour').value);
   const minuto = parseInt(document.getElementById('schMin').value) || 0;
   try{
-    const {data, error} = await sb.from('alertas_programadas').insert({dia_semana:dia, hora, minuto, activo:true, bodega}).select().single();
+    const {data, error} = await sb.from('alertas_programadas').insert({dia_semana:dia, hora, minuto, activo:true, bodega, tipo_reporte:tipo}).select().single();
     if(error) throw error;
-    schedules.push({id:data.id, dia:data.dia_semana, hora:data.hora, minuto:data.minuto, activo:data.activo, bodega:data.bodega});
+    schedules.push({id:data.id, dia:data.dia_semana, hora:data.hora, minuto:data.minuto, activo:data.activo, bodega:data.bodega, tipo:data.tipo_reporte||'completo'});
     renderSchedules();
-    setStatus('scheduleStatus', `Alerta programada para "${bodega || 'todas las bodegas'}". Se revisa cada 5 min en el servidor.`, 'ok');
+    setStatus('scheduleStatus', `Alerta programada para "${bodega || 'todas las bodegas'}" (${tipo==='critico'?'solo crítico':'completo'}). Se revisa cada 5 min en el servidor.`, 'ok');
   }catch(e){
     setStatus('scheduleStatus', 'Error: ' + e.message, 'err');
   }
