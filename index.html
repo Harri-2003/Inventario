@@ -3522,12 +3522,12 @@ function separarCantidadYTexto(linea){
 // Compara un patrón de regla (ej: "bolsa de grapa redonda") contra el texto
 // de una línea de pedido, tolerando plurales y palabras de más/menos — igual
 // de flexible que el buscador principal, para que no falle por detalles así.
-function patronCoincide(patron, textoNorm){
+function patronCoincide(patron, textoNorm, umbral=0.75){
   const palabrasPatron = palabrasClave(patron);
   if(!palabrasPatron.length) return false;
   const palabrasTexto = textoNorm.split(/\s+/).filter(Boolean);
   const coincidencias = palabrasPatron.filter(pp => palabrasTexto.some(pt => pt.includes(pp) || pp.includes(pt))).length;
-  return coincidencias >= Math.max(1, Math.ceil(palabrasPatron.length * 0.75));
+  return coincidencias >= Math.max(1, Math.ceil(palabrasPatron.length * umbral));
 }
 
 // Aplica las reglas internas (multiplicador de unidades, sinónimos de nombre)
@@ -3539,7 +3539,7 @@ function expandirConSinonimos(texto){
   const textoNorm = normalizeName(texto);
   let textoExpandido = texto;
   reglasPedidos.forEach(regla=>{
-    if(regla.tipo === 'sinonimo' && regla.aliasDe && patronCoincide(regla.patron, textoNorm)){
+    if(regla.tipo === 'sinonimo' && regla.aliasDe && patronCoincide(regla.patron, textoNorm, 1)){
       textoExpandido += ' ' + regla.aliasDe;
     }
   });
@@ -3552,7 +3552,8 @@ function aplicarReglasPedido(texto, cantidad){
   const notas = [];
 
   reglasPedidos.forEach(regla=>{
-    if(!patronCoincide(regla.patron, textoNorm)) return;
+    const umbral = regla.tipo==='sinonimo' ? 1 : 0.75;
+    if(!patronCoincide(regla.patron, textoNorm, umbral)) return;
     if(regla.tipo === 'multiplicador' && cantidad !== null && regla.factor){
       cantidadReal = cantidad * Number(regla.factor);
       notas.push(`${cantidad} × ${Number(regla.factor)} = ${cantidadReal} (${regla.patron})`);
@@ -3597,7 +3598,7 @@ document.getElementById('verificarPedidoBtn').addEventListener('click', async ()
 
     html += `<div style="padding:10px 0;border-bottom:1px solid var(--line-soft);">`;
     html += `<p style="margin:0 0 2px;font-weight:700;">${cantidadPedida!==null ? `${cantidadPedida} × ` : ''}${escapeHtml(textoPedido)}</p>`;
-    if(nota) html += `<p class="note" style="margin:0 0 6px;font-style:italic;">${escapeHtml(nota)}</p>`;
+    if(nota) html += `<details style="margin:0 0 6px;"><summary class="note" style="cursor:pointer;display:inline;">Detalles de la conversión</summary><p class="note" style="margin:4px 0 0;font-style:italic;">${escapeHtml(nota)}</p></details>`;
 
     if(!resultados.length){
       html += `<p class="note" style="margin:0;color:var(--red);">No lo encontré en el sistema.</p>`;
@@ -3660,19 +3661,37 @@ document.getElementById('verificarPedidoBtn').addEventListener('click', async ()
   box.innerHTML = html;
   box.querySelectorAll('[data-guardar-sinonimo]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
+      const guardado = btn.dataset.reglaId; // si ya existe, este clic es para DESHACER
+      if(guardado){
+        btn.disabled = true;
+        btn.textContent = 'Deshaciendo…';
+        try{
+          await sb.from('reglas_pedidos').delete().eq('id', guardado);
+          await cargarReglasPedidos();
+          delete btn.dataset.reglaId;
+          btn.textContent = `+ Recordar "${btn.dataset.guardarSinonimo}" = este producto`;
+          btn.style.color = '';
+        }catch(e){
+          btn.textContent = 'Error: ' + e.message;
+        }
+        btn.disabled = false;
+        return;
+      }
+
       const patron = btn.dataset.guardarSinonimo;
       const aliasDe = btn.dataset.aliasDe;
       btn.disabled = true;
       btn.textContent = 'Guardando…';
       try{
-        await sb.from('reglas_pedidos').insert({patron, tipo:'sinonimo', alias_de:aliasDe});
+        const {data} = await sb.from('reglas_pedidos').insert({patron, tipo:'sinonimo', alias_de:aliasDe}).select().single();
         await cargarReglasPedidos();
-        btn.textContent = '✓ Recordado — la próxima vez lo encuentra solo';
+        btn.dataset.reglaId = data.id;
+        btn.textContent = '✓ Recordado (clic de nuevo para deshacer)';
         btn.style.color = 'var(--apc-green)';
       }catch(e){
         btn.textContent = 'Error: ' + e.message;
-        btn.disabled = false;
       }
+      btn.disabled = false;
     });
   });
   setStatus('pedidoOcrStatus', faltantes ? `${faltantes} línea(s) con problemas (faltante o no encontrado).` : 'Todo el pedido se puede cubrir con el stock actual.', faltantes ? 'err' : 'ok');
