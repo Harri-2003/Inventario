@@ -777,12 +777,12 @@
         </p>
         <textarea id="pedidoTexto" style="min-height:180px;" placeholder="3 Carretos de fibra drop 1 hilo&#10;100 Tensores metálicos&#10;10 Ont Tp Link&#10;30 Stickers&#10;50 Rosetas"></textarea>
         <div class="row" style="margin-top:10px;">
-          <button id="pedidoImagenBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m21 15-5-5L6 21"/></svg> Pegar/subir imagen (texto simple)</button>
+          <button id="pedidoImagenBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m21 15-5-5L6 21"/></svg> Subir imagen (texto simple, sin IA)</button>
           <button id="pedidoImagenIaBtn" style="border-color:var(--cyan);color:var(--cyan);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M9 13v2M15 13v2"/></svg> Leer con IA (tabla o foto)</button>
           <button class="primary" id="verificarPedidoBtn">Verificar pedido</button>
           <button id="pedidoDescargarBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg> Descargar resultados</button>
         </div>
-        <p class="note" style="margin-top:6px;">"Leer con IA" entiende tablas con columnas y cantidades compuestas (ej: "780 metros, tramos de 250 y 530") — úsalo cuando el mensaje simple no funcione bien.</p>
+        <p class="note" style="margin-top:6px;">"Leer con IA" entiende tablas con columnas y cantidades compuestas (ej: "780 metros, tramos de 250 y 530"). También puedes simplemente <b>pegar la imagen directo</b> (Ctrl+V) en el cuadro de arriba — se analiza sola con IA, sin subir ningún archivo.</p>
         <input type="file" id="pedidoImagenInput" class="hidden-input" accept="image/*">
         <input type="file" id="pedidoImagenIaInput" class="hidden-input" accept="image/*">
         <div class="status" id="pedidoOcrStatus"></div>
@@ -3700,16 +3700,7 @@ document.getElementById('pedidoTexto').addEventListener('paste', async (e)=>{
   if(!img) return;
   e.preventDefault();
   const file = img.getAsFile();
-  setStatus('pedidoOcrStatus', 'Leyendo texto de la imagen pegada…', '');
-  try{
-    await asegurarTesseract();
-    const { data: { text } } = await Tesseract.recognize(file, 'spa');
-    const actual = document.getElementById('pedidoTexto').value.trim();
-    document.getElementById('pedidoTexto').value = actual ? actual + '\n' + text : text;
-    setStatus('pedidoOcrStatus', 'Texto extraído. Revísalo y dale "Verificar pedido".', 'ok');
-  }catch(err){
-    setStatus('pedidoOcrStatus', 'No se pudo leer el texto de esa imagen.', 'err');
-  }
+  await leerPedidoConIA(file); // pegar una imagen va directo a la IA (mejor para tablas y capturas de chat)
 });
 document.getElementById('pedidoTexto').addEventListener('input', (e)=>{
   if(!e.target.value.trim()){
@@ -3736,7 +3727,17 @@ async function leerPedidoConIA(file){
     const {data, error} = await sb.functions.invoke('leer-pedido-ia', {
       body: {imagenBase64: base64, mimeType: file.type || 'image/png'}
     });
-    if(error) throw error;
+    if(error){
+      // El SDK a veces trae el detalle real del error dentro de error.context (la respuesta HTTP cruda)
+      let detalle = error.message || '';
+      try{
+        if(error.context && typeof error.context.json === 'function'){
+          const cuerpo = await error.context.json();
+          if(cuerpo && cuerpo.error) detalle = cuerpo.error;
+        }
+      }catch(e2){ /* si no se puede leer el detalle, se queda con el mensaje genérico */ }
+      throw new Error(detalle);
+    }
     if(data.error) throw new Error(data.error);
 
     const items = data.items || [];
