@@ -777,11 +777,14 @@
         </p>
         <textarea id="pedidoTexto" style="min-height:180px;" placeholder="3 Carretos de fibra drop 1 hilo&#10;100 Tensores metálicos&#10;10 Ont Tp Link&#10;30 Stickers&#10;50 Rosetas"></textarea>
         <div class="row" style="margin-top:10px;">
-          <button id="pedidoImagenBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m21 15-5-5L6 21"/></svg> Pegar/subir imagen</button>
+          <button id="pedidoImagenBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m21 15-5-5L6 21"/></svg> Pegar/subir imagen (texto simple)</button>
+          <button id="pedidoImagenIaBtn" style="border-color:var(--cyan);color:var(--cyan);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M9 13v2M15 13v2"/></svg> Leer con IA (tabla o foto)</button>
           <button class="primary" id="verificarPedidoBtn">Verificar pedido</button>
           <button id="pedidoDescargarBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg> Descargar resultados</button>
         </div>
+        <p class="note" style="margin-top:6px;">"Leer con IA" entiende tablas con columnas y cantidades compuestas (ej: "780 metros, tramos de 250 y 530") — úsalo cuando el mensaje simple no funcione bien.</p>
         <input type="file" id="pedidoImagenInput" class="hidden-input" accept="image/*">
+        <input type="file" id="pedidoImagenIaInput" class="hidden-input" accept="image/*">
         <div class="status" id="pedidoOcrStatus"></div>
         <div id="pedidoResultados" style="margin-top:16px;"></div>
       </div>
@@ -3632,6 +3635,9 @@ document.getElementById('verificarPedidoBtn').addEventListener('click', async ()
           }
         }
 
+        const esExacto = normalizeName(textoPedido) === normalizeName(it.name);
+        const botonSinonimo = esExacto ? '' : `<button data-guardar-sinonimo="${escapeHtml(textoPedido)}" data-alias-de="${escapeHtml(it.name)}" style="font-size:10.5px;padding:3px 7px;margin-top:3px;">+ Recordar "${escapeHtml(textoPedido)}" = este producto</button>`;
+
         html += `
           <div style="padding:4px 0;font-size:13px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -3642,6 +3648,7 @@ document.getElementById('verificarPedidoBtn').addEventListener('click', async ()
               </span>
             </div>
             ${lineaQuedaria}
+            ${botonSinonimo}
           </div>
         `;
         ultimoResultadoPedido.push({pedido:lineaOriginal, cantidadPedida:cantidadPedida||'', cantidadReal:cantidad||'', producto:it.name, bodega:it.grupo, disponible:it.qty, quedaria: quedaria===null?'':quedaria, estado});
@@ -3651,6 +3658,23 @@ document.getElementById('verificarPedidoBtn').addEventListener('click', async ()
   });
 
   box.innerHTML = html;
+  box.querySelectorAll('[data-guardar-sinonimo]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const patron = btn.dataset.guardarSinonimo;
+      const aliasDe = btn.dataset.aliasDe;
+      btn.disabled = true;
+      btn.textContent = 'Guardando…';
+      try{
+        await sb.from('reglas_pedidos').insert({patron, tipo:'sinonimo', alias_de:aliasDe});
+        await cargarReglasPedidos();
+        btn.textContent = '✓ Recordado — la próxima vez lo encuentra solo';
+        btn.style.color = 'var(--apc-green)';
+      }catch(e){
+        btn.textContent = 'Error: ' + e.message;
+        btn.disabled = false;
+      }
+    });
+  });
   setStatus('pedidoOcrStatus', faltantes ? `${faltantes} línea(s) con problemas (faltante o no encontrado).` : 'Todo el pedido se puede cubrir con el stock actual.', faltantes ? 'err' : 'ok');
 });
 
@@ -3693,6 +3717,62 @@ document.getElementById('pedidoTexto').addEventListener('input', (e)=>{
     ultimoResultadoPedido = [];
     setStatus('pedidoOcrStatus', '', '');
   }
+});
+
+// ================== Leer con IA (Gemini, vía Edge Function) ==================
+function archivoABase64(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result.split(',')[1]); // quita el prefijo "data:image/...;base64,"
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function leerPedidoConIA(file){
+  setStatus('pedidoOcrStatus', 'Leyendo con IA (puede tardar unos segundos)…', '');
+  try{
+    const base64 = await archivoABase64(file);
+    const {data, error} = await sb.functions.invoke('leer-pedido-ia', {
+      body: {imagenBase64: base64, mimeType: file.type || 'image/png'}
+    });
+    if(error) throw error;
+    if(data.error) throw new Error(data.error);
+
+    const items = data.items || [];
+    if(!items.length){
+      setStatus('pedidoOcrStatus', 'La IA no encontró materiales en esa imagen.', 'err');
+      return;
+    }
+
+    const lineasNuevas = items.map(it=>{
+      const nota = it.notaCantidad ? ` (${it.notaCantidad})` : '';
+      return `${it.cantidad} ${it.descripcion}${nota}`;
+    }).join('\n');
+    const actual = document.getElementById('pedidoTexto').value.trim();
+    document.getElementById('pedidoTexto').value = actual ? actual + '\n' + lineasNuevas : lineasNuevas;
+
+    // Registro para transparencia (qué leyó la IA, quién lo pidió)
+    const s = getSession();
+    try{
+      await sb.from('lecturas_ia_pedidos').insert({
+        entrada_resumen: `Imagen (${file.name || 'pegada'})`,
+        resultado: items,
+        usuario: s ? s.username : null
+      });
+    }catch(e){ console.error(e); }
+
+    setStatus('pedidoOcrStatus', `La IA encontró ${items.length} material(es). Revísalos (las cantidades "compuestas" quedaron anotadas entre paréntesis) y dale "Verificar pedido".`, 'ok');
+  }catch(err){
+    setStatus('pedidoOcrStatus', 'Error leyendo con IA: ' + err.message + ' (¿ya desplegaste la función leer-pedido-ia en Supabase?)', 'err');
+  }
+}
+
+document.getElementById('pedidoImagenIaBtn').addEventListener('click', ()=>document.getElementById('pedidoImagenIaInput').click());
+document.getElementById('pedidoImagenIaInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(file) await leerPedidoConIA(file);
+  e.target.value = '';
 });
 
 document.getElementById('pedidoDescargarBtn').addEventListener('click', async ()=>{
