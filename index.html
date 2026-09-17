@@ -1403,6 +1403,7 @@ async function reloadProductosOnly(){
 let invEditing = false;
 let invSearch = '';
 let verTodosCompacta = false; // se resetea a false cada vez que se cambia de bodega (ver seleccionarBodega)
+let ultimosVisiblesInventario = []; // últimos productos realmente mostrados en la tabla (respeta vista compacta); usado al descargar el Excel
 
 // ================== Alerta predictiva de agotamiento ==================
 // Se calcula a partir del historial real de cambios de cantidad (no asume
@@ -1763,19 +1764,24 @@ function render(){
 
   const bAct = bodegas.find(x=>x.nombre===currentStockBodega);
   const compacta = !!(bAct && bAct.vistaCompacta);
+  const esAdminActual = isAdmin();
+  // "Ver todos los productos" es exclusivo del admin. Para cualquier otra
+  // persona, si la bodega tiene vista compacta, SOLO ve lo destacado, punto
+  // — ni con el buscador puede encontrar lo que no está marcado con ★.
   let ocultosPorCompacta = 0;
-  if(compacta && !verTodosCompacta && !q){
+  if(compacta && (!esAdminActual || (!verTodosCompacta && !q))){
     const destacados = visibles.filter(it=>it.destacado);
     ocultosPorCompacta = visibles.length - destacados.length;
     visibles = destacados;
   }
   const btnVerTodos = document.getElementById('verTodosCompactaBtn');
   if(btnVerTodos){
-    btnVerTodos.style.display = compacta ? '' : 'none';
+    btnVerTodos.style.display = (compacta && esAdminActual) ? '' : 'none';
     btnVerTodos.textContent = verTodosCompacta
       ? 'Ocultar productos secundarios'
       : `Ver todos los productos${ocultosPorCompacta>0 ? ` (${ocultosPorCompacta} oculto${ocultosPorCompacta===1?'':'s'})` : ''}`;
   }
+  ultimosVisiblesInventario = visibles; // usado por "Descargar Excel": exporta lo mismo que se está viendo
 
   visibles.forEach(it=>{
     const st = statusOf(it);
@@ -2127,16 +2133,31 @@ function handleFile(file){
       const headers = rows[0];
       let nameCol = findCol(headers, ['producto','material','nombre','item','descripcion']);
       let qtyCol = findCol(headers, ['existencias','cantidad','stock']);
+      let minCol = findCol(headers, ['minimo','mínimo','min']);
+      let destCol = findCol(headers, ['destacado','estrella','favorito']);
       if(nameCol===-1) nameCol = 0;
       if(qtyCol===-1) qtyCol = 1;
 
+      // "Mínimo" y "Destacado" son columnas OPCIONALES: si el Excel no las trae,
+      // todo se comporta exactamente igual que antes (mínimo por defecto / sin
+      // tocar destacado). Si las trae, se usan para fijar esos valores al crear
+      // el producto (y también al actualizar uno que ya existía).
+      const valoresVerdadero = ['si','sí','true','1','x','yes'];
       const sums = {};
       for(let i=1;i<rows.length;i++){
         const r = rows[i];
         const name = String(r[nameCol]||'').trim();
         if(!name) continue;
+        if(!sums[name]) sums[name] = {qty:0, min:null, destacado:null};
         const qty = parseFloat(r[qtyCol]);
-        sums[name] = (sums[name]||0) + (isNaN(qty)?0:qty);
+        sums[name].qty += (isNaN(qty)?0:qty);
+        if(minCol!==-1){
+          const m = parseFloat(r[minCol]);
+          if(!isNaN(m)) sums[name].min = m;
+        }
+        if(destCol!==-1){
+          sums[name].destacado = valoresVerdadero.includes(String(r[destCol]||'').trim().toLowerCase());
+        }
       }
 
       const bodegaActual = bodegas.find(b=>b.nombre===currentStockBodega);
@@ -2144,20 +2165,24 @@ function handleFile(file){
 
       let importados = 0, ignorados = 0;
       for(const name of Object.keys(sums)){
+        const info = sums[name];
         let min = 10, etiqueta = name;
         if(!sinFiltro){
           const perm = matchPermitido(name);
           if(!perm){ ignorados++; continue; }
           min = perm.min; etiqueta = perm.etiqueta || name;
         }
+        if(info.min !== null) min = info.min;
         importados++;
-        const qty = sums[name];
+        const qty = info.qty;
         const existing = items.find(it=>it.grupo===currentStockBodega && normalizeName(it.name)===normalizeName(name));
         if(existing){
           existing.qty = qty;
+          if(info.min !== null) existing.min = info.min;
+          if(info.destacado !== null) existing.destacado = info.destacado;
           await saveItem(existing);
         } else {
-          const it = {id:uid(), name: etiqueta, qty, min, grupo: currentStockBodega};
+          const it = {id:uid(), name: etiqueta, qty, min, grupo: currentStockBodega, destacado: info.destacado===true};
           items.push(it);
           await saveItem(it);
         }
@@ -4193,7 +4218,7 @@ async function descargarPlantilla(columnas, nombreArchivo){
 }
 
 document.getElementById('plantillaInvBtn').addEventListener('click', ()=>{
-  descargarPlantilla(['Material','Cantidad','Minimo'], 'plantilla_inventario.xlsx');
+  descargarPlantilla(['Material','Cantidad','Minimo','Destacado'], 'plantilla_inventario.xlsx');
 });
 
 document.getElementById('plantillaTroncalBtn').addEventListener('click', ()=>{
@@ -4316,7 +4341,10 @@ async function descargarExcelFormateado({titulo, columnas, filas, coloresEstado}
 }
 
 document.getElementById('exportInvBtn').addEventListener('click', async ()=>{
-  const enBodega = items.filter(it=>it.grupo===currentStockBodega);
+  // Exporta lo mismo que está viendo en pantalla ahora mismo: si la bodega
+  // tiene vista compacta y no es admin (o el admin no le dio "Ver todos"),
+  // el Excel solo trae los productos destacados — no toda la bodega.
+  const enBodega = ultimosVisiblesInventario;
   if(!enBodega.length){ setStatus('uploadStatus','No hay materiales para exportar en esta bodega.','err'); return; }
   const filas = enBodega.map(it=>{
     const st = statusOf(it);
