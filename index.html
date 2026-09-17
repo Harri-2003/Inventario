@@ -204,6 +204,7 @@
   tr.low td{background:var(--red-dim);}
   tr.warn td{background:var(--amber-dim);}
   .name-cell{font-weight:600;}
+  .name-cell .name-text{display:block;white-space:normal;word-break:break-word;line-height:1.35;}
   input.qty,input.minv{width:74px;font-family:var(--mono);text-align:right;}
 
   .badge{
@@ -269,7 +270,9 @@
       text-transform:uppercase;letter-spacing:0.4px;font-weight:600;flex:none;
     }
     td input{text-align:right;}
-    .name-cell input{text-align:left !important;font-size:14px;}
+    .name-cell{align-items:flex-start;flex-direction:column;gap:2px;}
+    .name-cell input{text-align:left !important;font-size:14px;width:100% !important;}
+    .name-cell .name-text{font-size:14px;}
   }
 
 
@@ -1810,7 +1813,9 @@ function render(){
     const dis = editable ? '' : 'disabled';
     tr.innerHTML = `
       <td class="name-cell" data-label="Material">
-        <input type="text" value="${escapeHtml(it.name)}" ${dis} data-field="name" data-id="${it.id}" style="border:none;background:transparent;font-weight:600;padding:2px;width:70%;">
+        ${editable
+          ? `<input type="text" value="${escapeHtml(it.name)}" data-field="name" data-id="${it.id}" title="${escapeHtml(it.name)}" style="border:none;background:transparent;font-weight:600;padding:2px;width:100%;">`
+          : `<span class="name-text" title="${escapeHtml(it.name)}">${escapeHtml(it.name)}</span>`}
         ${proyeccionTexto(it.name, it.grupo, it.qty)}
       </td>
       <td style="text-align:right;" data-label="Cantidad"><input class="qty" type="number" min="0" value="${it.qty}" ${dis} data-field="qty" data-id="${it.id}"></td>
