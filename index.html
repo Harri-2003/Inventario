@@ -480,6 +480,7 @@
           <div class="field" style="margin-bottom:12px;">
             <input type="text" id="invSearch" placeholder="Buscar material… ej: amarra, conector, ont">
           </div>
+          <button id="verTodosCompactaBtn" style="display:none;margin-bottom:12px;font-size:12px;padding:6px 11px;"></button>
           <table>
             <thead>
               <tr>
@@ -487,6 +488,7 @@
                 <th style="text-align:right;">Cantidad</th>
                 <th style="text-align:right;">Mínimo</th>
                 <th>Estado</th>
+                <th style="text-align:center;" title="Marca los productos que siempre deben verse, aunque la bodega tenga 'Vista compacta' activada">★</th>
                 <th></th>
               </tr>
             </thead>
@@ -805,6 +807,8 @@
           una bodega que aparezca en Troncal pero se comporte con mínimos, o al revés.
           "Ninguna" en alertas = ni automática ni manual, solo se ve en la página. "Oculta" = solo tú la ves, con tu clave.
           "Registra entregas" agrega una herramienta para anotar "se entregó X a Fulano, por tal motivo" que descuenta sola del inventario.
+          "Vista compacta" oculta por defecto los productos que no estén marcados con ★ en Inventario (útil cuando una bodega tiene muchas
+          referencias distintas pero solo unas pocas se piden seguido); se puede ver el resto con el botón "Ver todos los productos".
         </p>
         <table>
           <thead>
@@ -816,12 +820,13 @@
               <th>Oculta</th>
               <th>Sin filtro*</th>
               <th>Entregas*</th>
+              <th>Vista compacta*</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="bodegasTbody"></tbody>
         </table>
-        <p class="note" style="margin:8px 0 0;">*Sin filtro y Entregas: solo aplican a bodegas con mínimos.</p>
+        <p class="note" style="margin:8px 0 0;">*Sin filtro, Entregas y Vista compacta: solo aplican a bodegas con mínimos.</p>
         <div class="footer-actions">
           <button id="addBodegaBtn">+ Agregar bodega</button>
         </div>
@@ -1318,12 +1323,12 @@ async function loadAll(){
       sb.from('bodegas').select('*').order('orden').order('nombre')
     ]);
     if(prod.error) throw prod.error;
-    items = (prod.data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+    items = (prod.data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo, destacado:!!r.destacado}));
     permitidos = (perm.data||[]).map(r=>({id:r.id, nombre:r.nombre_exacto, etiqueta:r.etiqueta, min:Number(r.minimo_defecto), grupo:r.grupo}));
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
     schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo, bodega:r.bodega, tipo:r.tipo_reporte||'completo'}));
     troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal', tipoMaterial:r.tipo_material||'carrete'}));
-    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, registraEntregas:r.registra_entregas, orden:r.orden}));
+    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, registraEntregas:r.registra_entregas, vistaCompacta:r.vista_compacta, orden:r.orden}));
     if(!bodegas.some(b=>b.nombre===currentStockBodega && b.tipo==='stock')){
       const primero = bodegas.find(b=>b.lado==='inventario' && b.tipo==='stock' && !b.oculta) || bodegas.find(b=>b.tipo==='stock' && !b.oculta);
       if(primero) currentStockBodega = primero.nombre;
@@ -1385,7 +1390,7 @@ async function reloadProductosOnly(){
   try{
     const {data, error} = await sb.from('productos').select('*').order('grupo').order('nombre');
     if(error) throw error;
-    items = (data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+    items = (data||[]).map(r=>({id:r.id, name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo, destacado:!!r.destacado}));
     render();
     setConnLed('ok');
   }catch(e){
@@ -1397,6 +1402,7 @@ async function reloadProductosOnly(){
 // ================== Inventario ==================
 let invEditing = false;
 let invSearch = '';
+let verTodosCompacta = false; // se resetea a false cada vez que se cambia de bodega (ver seleccionarBodega)
 
 // ================== Alerta predictiva de agotamiento ==================
 // Se calcula a partir del historial real de cambios de cantidad (no asume
@@ -1754,6 +1760,23 @@ function render(){
   const q = normalizeName(invSearch);
   let visibles = items.filter(it => it.grupo === currentStockBodega);
   if(q) visibles = visibles.filter(it => normalizeName(it.name||'').includes(q));
+
+  const bAct = bodegas.find(x=>x.nombre===currentStockBodega);
+  const compacta = !!(bAct && bAct.vistaCompacta);
+  let ocultosPorCompacta = 0;
+  if(compacta && !verTodosCompacta && !q){
+    const destacados = visibles.filter(it=>it.destacado);
+    ocultosPorCompacta = visibles.length - destacados.length;
+    visibles = destacados;
+  }
+  const btnVerTodos = document.getElementById('verTodosCompactaBtn');
+  if(btnVerTodos){
+    btnVerTodos.style.display = compacta ? '' : 'none';
+    btnVerTodos.textContent = verTodosCompacta
+      ? 'Ocultar productos secundarios'
+      : `Ver todos los productos${ocultosPorCompacta>0 ? ` (${ocultosPorCompacta} oculto${ocultosPorCompacta===1?'':'s'})` : ''}`;
+  }
+
   visibles.forEach(it=>{
     const st = statusOf(it);
     const tr = document.createElement('tr');
@@ -1767,6 +1790,7 @@ function render(){
       <td style="text-align:right;" data-label="Cantidad"><input class="qty" type="number" min="0" value="${it.qty}" ${dis} data-field="qty" data-id="${it.id}"></td>
       <td style="text-align:right;" data-label="Mínimo"><input class="minv" type="number" min="0" value="${it.min}" ${dis} data-field="min" data-id="${it.id}"></td>
       <td data-label="Estado"><span class="badge ${st==='low'?'low':st==='warn'?'warn':'ok'}">${st==='low'?'Agotado':st==='warn'?'Por acabarse':'Ok'}</span></td>
+      <td style="text-align:center;" data-label="Destacado"><input type="checkbox" ${it.destacado?'checked':''} ${dis} data-field="destacado" data-id="${it.id}" title="Mostrar siempre, aunque la bodega tenga 'Vista compacta' activada"></td>
       <td data-label="">${editable ? `<button class="del" data-id="${it.id}" title="Eliminar"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M18 6 6 18M6 6l12 12"/></svg></button>` : ''}</td>
     `;
     tbody.appendChild(tr);
@@ -1779,8 +1803,9 @@ function render(){
         const field = e.target.dataset.field;
         const it = items.find(x=>x.id===id);
         if(!it) return;
-        it[field] = (field==='qty'||field==='min') ? (parseFloat(e.target.value)||0) : e.target.value;
+        it[field] = field==='destacado' ? e.target.checked : (field==='qty'||field==='min') ? (parseFloat(e.target.value)||0) : e.target.value;
         await saveItem(it);
+        if(field==='destacado') render(); // puede sacar/meter la fila si la vista compacta está activa
       });
     });
 
@@ -1805,7 +1830,7 @@ function render(){
 
 async function saveItem(it){
   try{
-    const payload = { nombre: it.name, cantidad: it.qty, minimo: it.min, grupo: it.grupo || 'General' };
+    const payload = { nombre: it.name, cantidad: it.qty, minimo: it.min, grupo: it.grupo || 'General', destacado: !!it.destacado };
     let query;
     if(it.id && it.id.length===36){
       payload.id = it.id;
@@ -2479,6 +2504,7 @@ function renderBodegasAdmin(){
       <td data-label="Oculta" style="text-align:center;"><input type="checkbox" data-bfield="oculta" data-bid="${b.id}" ${b.oculta?'checked':''}></td>
       <td data-label="Sin filtro" style="text-align:center;"><input type="checkbox" data-bfield="sinFiltro" data-bid="${b.id}" ${b.sinFiltro?'checked':''} ${b.tipo!=='stock'?'disabled':''}></td>
       <td data-label="Registra entregas" style="text-align:center;"><input type="checkbox" data-bfield="registraEntregas" data-bid="${b.id}" ${b.registraEntregas?'checked':''} ${b.tipo!=='stock'?'disabled':''} title="Agrega una herramienta para anotar entregas que descuentan solas del inventario"></td>
+      <td data-label="Vista compacta" style="text-align:center;"><input type="checkbox" data-bfield="vistaCompacta" data-bid="${b.id}" ${b.vistaCompacta?'checked':''} ${b.tipo!=='stock'?'disabled':''} title="Oculta por defecto los productos que no estén marcados con ★, mostrando solo los más usados"></td>
       <td data-label="">
         <button class="primary" data-guardar-bodega="${b.id}" style="font-size:11px;padding:6px 10px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h6"/></svg> Guardar</button>
         <button class="del" data-remove-bodega="${b.id}" title="Eliminar"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
@@ -2493,7 +2519,7 @@ function renderBodegasAdmin(){
       const b = bodegas.find(x=>x.id===e.target.dataset.bid);
       if(!b) return;
       const field = e.target.dataset.bfield;
-      b[field] = field==='oculta'||field==='sinFiltro'||field==='registraEntregas' ? e.target.checked : e.target.value;
+      b[field] = field==='oculta'||field==='sinFiltro'||field==='registraEntregas'||field==='vistaCompacta' ? e.target.checked : e.target.value;
       if(field==='tipo'){
         // "sin filtro" solo aplica a bodegas con mínimos; refresca para des/habilitar el checkbox
         renderBodegasAdmin();
@@ -2543,7 +2569,7 @@ function renderBodegasAdmin(){
 
 async function saveBodega(b){
   try{
-    const payload = { nombre:b.nombre, tipo:b.tipo, lado: b.lado || (b.tipo==='stock'?'inventario':'troncal'), modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro, registra_entregas:!!b.registraEntregas };
+    const payload = { nombre:b.nombre, tipo:b.tipo, lado: b.lado || (b.tipo==='stock'?'inventario':'troncal'), modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro, registra_entregas:!!b.registraEntregas, vista_compacta:!!b.vistaCompacta };
     let query;
     if(b.id && b.id.length===36){
       payload.id = b.id;
@@ -2564,7 +2590,7 @@ document.getElementById('addBodegaBtn').addEventListener('click', async ()=>{
   let nombreBase = 'Nueva bodega', n = 1;
   while(bodegas.some(x=>normalizeName(x.nombre)===normalizeName(n===1?nombreBase:`${nombreBase} ${n}`))) n++;
   const nombre = n===1 ? nombreBase : `${nombreBase} ${n}`;
-  const b = {id:uid(), nombre, tipo:'stock', lado:'inventario', modoAlertas:'automaticas', oculta:false, sinFiltro:false, registraEntregas:false, orden:bodegas.length+1};
+  const b = {id:uid(), nombre, tipo:'stock', lado:'inventario', modoAlertas:'automaticas', oculta:false, sinFiltro:false, registraEntregas:false, vistaCompacta:false, orden:bodegas.length+1};
   bodegas.push(b);
   renderBodegasAdmin();
   await saveBodega(b);
@@ -2632,7 +2658,7 @@ async function crearBodegaRapida(lado){
   const b = {
     id:uid(), nombre:nombre.trim(), tipo: esStock?'stock':'log',
     lado, // dónde aparece (Inventario o Troncal) — independiente de cómo se comporta
-    modoAlertas, oculta:false, sinFiltro:false, registraEntregas:false, orden:bodegas.length+1
+    modoAlertas, oculta:false, sinFiltro:false, registraEntregas:false, vistaCompacta:false, orden:bodegas.length+1
   };
   bodegas.push(b);
   await saveBodega(b);
@@ -2689,6 +2715,7 @@ function seleccionarBodega(b){
 
   if(b.tipo === 'stock'){
     currentStockBodega = b.nombre;
+    verTodosCompacta = false; // al cambiar de bodega, la vista compacta (si aplica) vuelve a arrancar oculta
     document.getElementById('stockViewTitle').textContent = enInventario ? 'Inventario' : `Inventario — ${b.nombre}`;
     moverBloqueA(slotId, 'stockViewBlock');
     render();
@@ -3085,6 +3112,11 @@ async function saveTroncal(en){
 
 document.getElementById('invSearch').addEventListener('input', (e)=>{
   invSearch = e.target.value;
+  render();
+});
+
+document.getElementById('verTodosCompactaBtn').addEventListener('click', ()=>{
+  verTodosCompacta = !verTodosCompacta;
   render();
 });
 
@@ -3999,8 +4031,8 @@ document.getElementById('generarRespaldoBtn').addEventListener('click', async ()
       items.map(it=>[it.name, it.qty, it.min, it.grupo]));
 
     // Bodegas
-    hoja('Bodegas', ['Nombre','Aparece en','Comportamiento','Alertas','Oculta','Sin filtro','Registra entregas'],
-      bodegas.map(b=>[b.nombre, b.lado, b.tipo, b.modoAlertas, b.oculta?'Sí':'No', b.sinFiltro?'Sí':'No', b.registraEntregas?'Sí':'No']));
+    hoja('Bodegas', ['Nombre','Aparece en','Comportamiento','Alertas','Oculta','Sin filtro','Registra entregas','Vista compacta'],
+      bodegas.map(b=>[b.nombre, b.lado, b.tipo, b.modoAlertas, b.oculta?'Sí':'No', b.sinFiltro?'Sí':'No', b.registraEntregas?'Sí':'No', b.vistaCompacta?'Sí':'No']));
 
     // Troncal
     hoja('Troncal', ['Material','Tipo','Metros','Entregado a','Fecha','Observación','Bodega'],
