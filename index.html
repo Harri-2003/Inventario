@@ -537,6 +537,23 @@
         <div id="entregasRecientesList" style="margin-top:14px;"></div>
       </div>
 
+      <div class="card" id="solicitudCard" style="display:none;">
+        <h2>Solicitar material</h2>
+        <p class="note">¿Necesitas algo de esta bodega? Escribe qué materiales requieres y para qué — se envía directo por Telegram para que se pueda alistar.</p>
+        <div class="field">
+          <label>Tu nombre (opcional)</label>
+          <input type="text" id="solicitudNombre" placeholder="ej: Juan, técnico de campo">
+        </div>
+        <div class="field" style="margin-top:10px;">
+          <label>¿Qué necesitas?</label>
+          <textarea id="solicitudTexto" placeholder="ej: 2 SFP Mikrotik 1.25G 20km, 1 patchcord LC/LC 3m — para instalación en el sector X" style="min-height:70px;"></textarea>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button class="primary" id="solicitudBtn">Enviar solicitud</button>
+        </div>
+        <div class="status" id="solicitudStatus"></div>
+      </div>
+
       <div class="card">
         <h2>Notas de la bodega</h2>
         <p class="note">Avisos, pendientes o recordatorios del equipo — no ligados a ningún material en concreto.</p>
@@ -809,6 +826,8 @@
           "Registra entregas" agrega una herramienta para anotar "se entregó X a Fulano, por tal motivo" que descuenta sola del inventario.
           "Vista compacta" oculta por defecto los productos que no estén marcados con ★ en Inventario (útil cuando una bodega tiene muchas
           referencias distintas pero solo unas pocas se piden seguido); se puede ver el resto con el botón "Ver todos los productos".
+          "Solicitudes" agrega una tarjeta de "Solicitar material": cualquiera que vea esa bodega puede escribir qué necesita y te llega
+          un mensaje de Telegram (a los mismos destinatarios configurados para las alertas de esa bodega).
         </p>
         <table>
           <thead>
@@ -821,12 +840,13 @@
               <th>Sin filtro*</th>
               <th>Entregas*</th>
               <th>Vista compacta*</th>
+              <th>Solicitudes*</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="bodegasTbody"></tbody>
         </table>
-        <p class="note" style="margin:8px 0 0;">*Sin filtro, Entregas y Vista compacta: solo aplican a bodegas con mínimos.</p>
+        <p class="note" style="margin:8px 0 0;">*Sin filtro, Entregas, Vista compacta y Solicitudes: solo aplican a bodegas con mínimos.</p>
         <div class="footer-actions">
           <button id="addBodegaBtn">+ Agregar bodega</button>
         </div>
@@ -1328,7 +1348,7 @@ async function loadAll(){
     recipients = (dest.data||[]).map(r=>({id:r.id, chatId:r.chat_id, nombre:r.nombre, grupos:r.grupos||[], recibeAuto: r.recibe_automaticas !== false}));
     schedules = (sched.data||[]).map(r=>({id:r.id, dia:r.dia_semana, hora:r.hora, minuto:r.minuto, activo:r.activo, bodega:r.bodega, tipo:r.tipo_reporte||'completo'}));
     troncalEntries = (tron.data||[]).map(r=>({id:r.id, material:r.material, metros:Number(r.metros), entregadoA:r.entregado_a, fecha:r.fecha, observacion:r.observacion, devuelto:Number(r.devuelto||0), bodega:r.bodega||'Troncal', tipoMaterial:r.tipo_material||'carrete'}));
-    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, registraEntregas:r.registra_entregas, vistaCompacta:r.vista_compacta, orden:r.orden}));
+    bodegas = (bod.data||[]).map(r=>({id:r.id, nombre:r.nombre, tipo:r.tipo, lado: r.lado || (r.tipo==='stock'?'inventario':'troncal'), modoAlertas:r.modo_alertas, oculta:r.oculta, sinFiltro:r.sin_filtro, registraEntregas:r.registra_entregas, vistaCompacta:r.vista_compacta, aceptaPedidos:r.acepta_pedidos, orden:r.orden}));
     if(!bodegas.some(b=>b.nombre===currentStockBodega && b.tipo==='stock')){
       const primero = bodegas.find(b=>b.lado==='inventario' && b.tipo==='stock' && !b.oculta) || bodegas.find(b=>b.tipo==='stock' && !b.oculta);
       if(primero) currentStockBodega = primero.nombre;
@@ -1936,8 +1956,39 @@ document.getElementById('habilitarEntregaBtn').addEventListener('click', async (
 
 // Completa: además trae de Supabase el listado de entregas recientes. Se usa
 // al entrar/cambiar de bodega, no en cada tecla (para no golpear la red de más).
+function renderSolicitudCard(){
+  const card = document.getElementById('solicitudCard');
+  if(!card) return;
+  const b = bodegas.find(x=>x.nombre===currentStockBodega);
+  card.style.display = (b && b.aceptaPedidos && puedeVerBodega(currentStockBodega)) ? '' : 'none';
+  const s = getSession();
+  const nombreInput = document.getElementById('solicitudNombre');
+  if(nombreInput && !nombreInput.value && s && s.username) nombreInput.value = s.username;
+}
+
+document.getElementById('solicitudBtn').addEventListener('click', async ()=>{
+  const texto = document.getElementById('solicitudTexto').value.trim();
+  const nombre = document.getElementById('solicitudNombre').value.trim();
+  if(!texto){ setStatus('solicitudStatus', 'Escribe qué necesitas antes de enviar.', 'err'); return; }
+  const btn = document.getElementById('solicitudBtn');
+  btn.disabled = true;
+  try{
+    const {error} = await sb.rpc('enviar_solicitud_pedido', {
+      p_bodega: currentStockBodega, p_solicitante: nombre || null, p_texto: texto
+    });
+    if(error) throw error;
+    document.getElementById('solicitudTexto').value = '';
+    setStatus('solicitudStatus', 'Solicitud enviada — ya debería estar llegando el mensaje a Telegram.', 'ok');
+  }catch(e){
+    console.error(e);
+    setStatus('solicitudStatus', 'No se pudo enviar la solicitud. Intenta de nuevo en un momento.', 'err');
+  }
+  btn.disabled = false;
+});
+
 async function renderEntregaCard(){
   renderEntregaProductoOptions();
+  renderSolicitudCard();
   const card = document.getElementById('entregaCard');
   const b = bodegas.find(x=>x.nombre===currentStockBodega);
   if(!b || !b.registraEntregas) return;
@@ -2536,6 +2587,7 @@ function renderBodegasAdmin(){
       <td data-label="Sin filtro" style="text-align:center;"><input type="checkbox" data-bfield="sinFiltro" data-bid="${b.id}" ${b.sinFiltro?'checked':''} ${b.tipo!=='stock'?'disabled':''}></td>
       <td data-label="Registra entregas" style="text-align:center;"><input type="checkbox" data-bfield="registraEntregas" data-bid="${b.id}" ${b.registraEntregas?'checked':''} ${b.tipo!=='stock'?'disabled':''} title="Agrega una herramienta para anotar entregas que descuentan solas del inventario"></td>
       <td data-label="Vista compacta" style="text-align:center;"><input type="checkbox" data-bfield="vistaCompacta" data-bid="${b.id}" ${b.vistaCompacta?'checked':''} ${b.tipo!=='stock'?'disabled':''} title="Oculta por defecto los productos que no estén marcados con ★, mostrando solo los más usados"></td>
+      <td data-label="Solicitudes" style="text-align:center;"><input type="checkbox" data-bfield="aceptaPedidos" data-bid="${b.id}" ${b.aceptaPedidos?'checked':''} ${b.tipo!=='stock'?'disabled':''} title="Agrega una tarjeta de 'Solicitar material': cualquiera que vea esta bodega puede escribir qué necesita y te llega un mensaje de Telegram"></td>
       <td data-label="">
         <button class="primary" data-guardar-bodega="${b.id}" style="font-size:11px;padding:6px 10px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h6"/></svg> Guardar</button>
         <button class="del" data-remove-bodega="${b.id}" title="Eliminar"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
@@ -2550,7 +2602,7 @@ function renderBodegasAdmin(){
       const b = bodegas.find(x=>x.id===e.target.dataset.bid);
       if(!b) return;
       const field = e.target.dataset.bfield;
-      b[field] = field==='oculta'||field==='sinFiltro'||field==='registraEntregas'||field==='vistaCompacta' ? e.target.checked : e.target.value;
+      b[field] = field==='oculta'||field==='sinFiltro'||field==='registraEntregas'||field==='vistaCompacta'||field==='aceptaPedidos' ? e.target.checked : e.target.value;
       if(field==='tipo'){
         // "sin filtro" solo aplica a bodegas con mínimos; refresca para des/habilitar el checkbox
         renderBodegasAdmin();
@@ -2600,7 +2652,7 @@ function renderBodegasAdmin(){
 
 async function saveBodega(b){
   try{
-    const payload = { nombre:b.nombre, tipo:b.tipo, lado: b.lado || (b.tipo==='stock'?'inventario':'troncal'), modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro, registra_entregas:!!b.registraEntregas, vista_compacta:!!b.vistaCompacta };
+    const payload = { nombre:b.nombre, tipo:b.tipo, lado: b.lado || (b.tipo==='stock'?'inventario':'troncal'), modo_alertas:b.modoAlertas, oculta:!!b.oculta, sin_filtro:!!b.sinFiltro, registra_entregas:!!b.registraEntregas, vista_compacta:!!b.vistaCompacta, acepta_pedidos:!!b.aceptaPedidos };
     let query;
     if(b.id && b.id.length===36){
       payload.id = b.id;
@@ -2621,7 +2673,7 @@ document.getElementById('addBodegaBtn').addEventListener('click', async ()=>{
   let nombreBase = 'Nueva bodega', n = 1;
   while(bodegas.some(x=>normalizeName(x.nombre)===normalizeName(n===1?nombreBase:`${nombreBase} ${n}`))) n++;
   const nombre = n===1 ? nombreBase : `${nombreBase} ${n}`;
-  const b = {id:uid(), nombre, tipo:'stock', lado:'inventario', modoAlertas:'automaticas', oculta:false, sinFiltro:false, registraEntregas:false, vistaCompacta:false, orden:bodegas.length+1};
+  const b = {id:uid(), nombre, tipo:'stock', lado:'inventario', modoAlertas:'automaticas', oculta:false, sinFiltro:false, registraEntregas:false, vistaCompacta:false, aceptaPedidos:false, orden:bodegas.length+1};
   bodegas.push(b);
   renderBodegasAdmin();
   await saveBodega(b);
@@ -2689,7 +2741,7 @@ async function crearBodegaRapida(lado){
   const b = {
     id:uid(), nombre:nombre.trim(), tipo: esStock?'stock':'log',
     lado, // dónde aparece (Inventario o Troncal) — independiente de cómo se comporta
-    modoAlertas, oculta:false, sinFiltro:false, registraEntregas:false, vistaCompacta:false, orden:bodegas.length+1
+    modoAlertas, oculta:false, sinFiltro:false, registraEntregas:false, vistaCompacta:false, aceptaPedidos:false, orden:bodegas.length+1
   };
   bodegas.push(b);
   await saveBodega(b);
@@ -4062,8 +4114,8 @@ document.getElementById('generarRespaldoBtn').addEventListener('click', async ()
       items.map(it=>[it.name, it.qty, it.min, it.grupo]));
 
     // Bodegas
-    hoja('Bodegas', ['Nombre','Aparece en','Comportamiento','Alertas','Oculta','Sin filtro','Registra entregas','Vista compacta'],
-      bodegas.map(b=>[b.nombre, b.lado, b.tipo, b.modoAlertas, b.oculta?'Sí':'No', b.sinFiltro?'Sí':'No', b.registraEntregas?'Sí':'No', b.vistaCompacta?'Sí':'No']));
+    hoja('Bodegas', ['Nombre','Aparece en','Comportamiento','Alertas','Oculta','Sin filtro','Registra entregas','Vista compacta','Solicitudes'],
+      bodegas.map(b=>[b.nombre, b.lado, b.tipo, b.modoAlertas, b.oculta?'Sí':'No', b.sinFiltro?'Sí':'No', b.registraEntregas?'Sí':'No', b.vistaCompacta?'Sí':'No', b.aceptaPedidos?'Sí':'No']));
 
     // Troncal
     hoja('Troncal', ['Material','Tipo','Metros','Entregado a','Fecha','Observación','Bodega'],
