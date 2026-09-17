@@ -1910,7 +1910,13 @@ function renderEntregaProductoOptions(){
   }
 
   const sel = document.getElementById('entregaProducto');
-  const enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
+  let enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
+  // Igual que en Inventario: si la bodega tiene vista compacta, solo el
+  // admin ve el listado completo para registrar entregas; para todos los
+  // demás, el selector solo ofrece los productos destacados (★).
+  if(b.vistaCompacta && !isAdmin()){
+    enEstaBodega = enEstaBodega.filter(it=>it.destacado);
+  }
   const actual = sel.value;
   sel.innerHTML = enEstaBodega.map(it=>`<option value="${escapeHtml(it.name)}">${escapeHtml(it.name)} (hay ${it.qty})</option>`).join('');
   if(actual && enEstaBodega.some(it=>it.name===actual)) sel.value = actual;
