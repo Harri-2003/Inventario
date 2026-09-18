@@ -551,6 +551,7 @@
           <button class="primary" id="solicitudBtn">Enviar solicitud</button>
         </div>
         <div class="status" id="solicitudStatus"></div>
+        <div id="solicitudesRecientesList" style="margin-top:14px;"></div>
       </div>
 
       <div class="card">
@@ -2008,10 +2009,67 @@ function renderSolicitudCard(){
   const card = document.getElementById('solicitudCard');
   if(!card) return;
   const b = bodegas.find(x=>x.nombre===currentStockBodega);
-  card.style.display = (b && b.aceptaPedidos && puedeVerBodega(currentStockBodega)) ? '' : 'none';
+  const visible = !!(b && b.aceptaPedidos && puedeVerBodega(currentStockBodega));
+  card.style.display = visible ? '' : 'none';
   const s = getSession();
   const nombreInput = document.getElementById('solicitudNombre');
   if(nombreInput && !nombreInput.value && s && s.username) nombreInput.value = s.username;
+  if(visible) cargarSolicitudesRecientes();
+}
+
+async function cargarSolicitudesRecientes(){
+  const list = document.getElementById('solicitudesRecientesList');
+  if(!list) return;
+  const bodegaAlPedir = currentStockBodega;
+  list.innerHTML = '<span class="note" style="margin:0;">Cargando solicitudes recientes…</span>';
+  try{
+    const {data, error} = await sb.from('solicitudes_pedido').select('*').eq('bodega', bodegaAlPedir).order('creado_en', {ascending:false}).limit(15);
+    if(error) throw error;
+    if(bodegaAlPedir !== currentStockBodega) return; // cambiaron de bodega mientras cargaba
+    if(!data.length){ list.innerHTML = '<span class="note" style="margin:0;">Todavía no hay solicitudes en esta bodega.</span>'; return; }
+    const admin = isAdmin();
+    list.innerHTML = '<p class="note" style="margin:0 0 8px;font-weight:600;">Solicitudes recientes:</p>' + data.map(sol=>{
+      const fecha = sol.creado_en ? new Date(sol.creado_en).toLocaleString('es-CO', {dateStyle:'short', timeStyle:'short'}) : '';
+      const respondida = sol.estado === 'respondida';
+      return `
+        <div style="padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+            <div>
+              ${sol.solicitante ? `<b>${escapeHtml(sol.solicitante)}</b> — ` : ''}${escapeHtml(sol.texto)}
+              <span style="color:var(--text-dim);font-size:11px;"> · ${fecha}</span>
+            </div>
+            <span class="badge ${respondida?'ok':'warn'}" style="flex:none;">${respondida?'Respondida':'Pendiente'}</span>
+          </div>
+          ${sol.respuesta ? `<div style="margin-top:6px;padding:8px 10px;background:var(--panel3);border-radius:8px;"><b>Respuesta:</b> ${escapeHtml(sol.respuesta)}</div>` : ''}
+          ${admin ? `
+            <div style="margin-top:8px;display:flex;gap:6px;">
+              <input type="text" class="solicitud-respuesta-input" data-id="${sol.id}" placeholder="${respondida?'Actualizar respuesta…':'ej: Sí hay stock, ya te lo alisto.'}" value="${escapeHtml(sol.respuesta||'')}" style="flex:1;">
+              <button class="primary solicitud-responder-btn" data-id="${sol.id}" style="font-size:11px;padding:6px 10px;">Responder</button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+
+    list.querySelectorAll('.solicitud-responder-btn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.id;
+        const input = list.querySelector(`.solicitud-respuesta-input[data-id="${id}"]`);
+        const respuesta = input ? input.value.trim() : '';
+        if(!respuesta){ return; }
+        btn.disabled = true;
+        try{
+          await sb.from('solicitudes_pedido').update({
+            respuesta, estado:'respondida', respondido_en: new Date().toISOString()
+          }).eq('id', id);
+          cargarSolicitudesRecientes();
+        }catch(e){ console.error(e); btn.disabled = false; }
+      });
+    });
+  }catch(e){
+    console.error(e);
+    list.innerHTML = '<span class="note" style="margin:0;">No se pudieron cargar las solicitudes.</span>';
+  }
 }
 
 document.getElementById('solicitudBtn').addEventListener('click', async ()=>{
@@ -2027,6 +2085,7 @@ document.getElementById('solicitudBtn').addEventListener('click', async ()=>{
     if(error) throw error;
     document.getElementById('solicitudTexto').value = '';
     setStatus('solicitudStatus', 'Solicitud enviada — ya debería estar llegando el mensaje a Telegram.', 'ok');
+    cargarSolicitudesRecientes();
   }catch(e){
     console.error(e);
     setStatus('solicitudStatus', 'No se pudo enviar la solicitud. Intenta de nuevo en un momento.', 'err');
