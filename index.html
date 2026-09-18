@@ -2124,6 +2124,7 @@ async function cargarSolicitudesRecientes(){
             <div style="margin-top:8px;display:flex;gap:6px;">
               <input type="text" class="solicitud-respuesta-input" data-id="${sol.id}" placeholder="${respondida?'Actualizar respuesta…':'ej: Sí hay stock, ya te lo alisto.'}" value="${escapeHtml(sol.respuesta||'')}" style="flex:1;">
               <button class="primary solicitud-responder-btn" data-id="${sol.id}" style="font-size:11px;padding:6px 10px;">Responder</button>
+              <button class="solicitud-eliminar-btn" data-id="${sol.id}" title="Eliminar esta solicitud" style="font-size:11px;padding:6px 10px;flex:none;background:transparent;border:1px solid var(--line);color:var(--text-dim);border-radius:var(--radius-sm);cursor:pointer;">🗑</button>
             </div>
           ` : ''}
         </div>
@@ -2141,6 +2142,20 @@ async function cargarSolicitudesRecientes(){
           await sb.from('solicitudes_pedido').update({
             respuesta, estado:'respondida', respondido_en: new Date().toISOString()
           }).eq('id', id);
+          cargarSolicitudesRecientes();
+        }catch(e){ console.error(e); btn.disabled = false; }
+      });
+    });
+
+    // Solo para admin: borrar una solicitud (por ejemplo, pruebas que no son reales).
+    list.querySelectorAll('.solicitud-eliminar-btn').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const id = btn.dataset.id;
+        if(!confirm('¿Eliminar esta solicitud? Esta acción no se puede deshacer.')) return;
+        btn.disabled = true;
+        try{
+          const {error} = await sb.from('solicitudes_pedido').delete().eq('id', id);
+          if(error) throw error;
           cargarSolicitudesRecientes();
         }catch(e){ console.error(e); btn.disabled = false; }
       });
