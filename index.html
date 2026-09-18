@@ -514,16 +514,12 @@
           <span>Registrar entrega</span>
           <button id="habilitarEntregaBtn" style="font-size:11px;padding:6px 11px;display:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"/></svg> Habilitar edición</button>
         </h2>
-        <p class="note">Elige el producto, cuánto se entrega y a quién. Se descuenta solo de esta bodega y queda guardado con tu observación — no hace falta calcular nada a mano.</p>
-        <div class="row">
-          <div class="field">
-            <label>Producto</label>
-            <select id="entregaProducto"></select>
-          </div>
-          <div class="field" style="max-width:120px;">
-            <label>Cantidad</label>
-            <input type="number" id="entregaCantidad" min="0" value="1">
-          </div>
+        <p class="note">Agrega uno o varios productos, cuánto se entrega de cada uno y a quién. Se descuenta solo de esta bodega y queda guardado con tu observación — no hace falta calcular nada a mano.</p>
+        <div id="entregaLineas"></div>
+        <div class="row" style="margin-top:6px;">
+          <button id="entregaAgregarLineaBtn" style="font-size:12px;padding:6px 11px;" type="button">+ Agregar otro producto</button>
+        </div>
+        <div class="row" style="margin-top:14px;">
           <div class="field">
             <label>Entregado a</label>
             <input type="text" id="entregaA" placeholder="Nombre de la persona">
@@ -1934,18 +1930,65 @@ function renderEntregaProductoOptions(){
     }
   }
 
-  const sel = document.getElementById('entregaProducto');
-  let enEstaBodega = items.filter(it=>it.grupo===currentStockBodega);
+  renderLineasEntrega();
+}
+
+// Cada línea es {producto, cantidad} — se puede entregar varios productos
+// distintos en una sola entrega (mismo "Entregado a"/observación para todos),
+// en vez de tener que repetir el formulario producto por producto.
+let entregaLineas = [{producto:'', cantidad:1}];
+
+function productosParaEntrega(){
+  let lista = items.filter(it=>it.grupo===currentStockBodega);
+  const b = bodegas.find(x=>x.nombre===currentStockBodega);
   // Igual que en Inventario: si la bodega tiene vista compacta, solo el
   // admin ve el listado completo para registrar entregas; para todos los
   // demás, el selector solo ofrece los productos destacados (★).
-  if(b.vistaCompacta && !isAdmin()){
-    enEstaBodega = enEstaBodega.filter(it=>it.destacado);
+  if(b && b.vistaCompacta && !isAdmin()){
+    lista = lista.filter(it=>it.destacado);
   }
-  const actual = sel.value;
-  sel.innerHTML = enEstaBodega.map(it=>`<option value="${escapeHtml(it.name)}">${escapeHtml(it.name)} (hay ${it.qty})</option>`).join('');
-  if(actual && enEstaBodega.some(it=>it.name===actual)) sel.value = actual;
+  return lista;
 }
+
+function renderLineasEntrega(){
+  const cont = document.getElementById('entregaLineas');
+  if(!cont) return;
+  const disponibles = productosParaEntrega();
+  cont.innerHTML = entregaLineas.map((linea, idx)=>`
+    <div class="row" style="margin-top:${idx>0?'8':'0'}px;align-items:flex-end;">
+      <div class="field">
+        <label>Producto</label>
+        <select class="entrega-linea-producto" data-idx="${idx}">
+          <option value="">Selecciona…</option>
+          ${disponibles.map(it=>`<option value="${escapeHtml(it.name)}" ${it.name===linea.producto?'selected':''}>${escapeHtml(it.name)} (hay ${it.qty})</option>`).join('')}
+        </select>
+      </div>
+      <div class="field" style="max-width:120px;">
+        <label>Cantidad</label>
+        <input type="number" class="entrega-linea-cantidad" data-idx="${idx}" min="0" value="${linea.cantidad}">
+      </div>
+      ${entregaLineas.length>1 ? `<button type="button" class="del entrega-linea-quitar" data-idx="${idx}" title="Quitar este producto" style="margin-bottom:9px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>` : ''}
+    </div>
+  `).join('');
+
+  cont.querySelectorAll('.entrega-linea-producto').forEach(sel=>{
+    sel.addEventListener('change', e=>{ entregaLineas[+e.target.dataset.idx].producto = e.target.value; });
+  });
+  cont.querySelectorAll('.entrega-linea-cantidad').forEach(inp=>{
+    inp.addEventListener('input', e=>{ entregaLineas[+e.target.dataset.idx].cantidad = parseFloat(e.target.value)||0; });
+  });
+  cont.querySelectorAll('.entrega-linea-quitar').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      entregaLineas.splice(+btn.dataset.idx, 1);
+      renderLineasEntrega();
+    });
+  });
+}
+
+document.getElementById('entregaAgregarLineaBtn').addEventListener('click', ()=>{
+  entregaLineas.push({producto:'', cantidad:1});
+  renderLineasEntrega();
+});
 
 document.getElementById('habilitarEntregaBtn').addEventListener('click', async ()=>{
   if(document.getElementById('habilitarEntregaBtn').dataset.modo === 'cerrar'){
@@ -2044,38 +2087,64 @@ async function renderEntregaCard(){
 document.getElementById('registrarEntregaBtn').addEventListener('click', async ()=>{
   if(!(await requireEditBodega(currentStockBodega, 'entrega'))) return;
 
-  const nombreProducto = document.getElementById('entregaProducto').value;
-  const cantidad = parseFloat(document.getElementById('entregaCantidad').value);
   const entregadoA = document.getElementById('entregaA').value.trim();
   const observacion = document.getElementById('entregaObservacion').value.trim();
+  const filas = entregaLineas.filter(f=>f.producto); // ignora líneas que quedaron sin producto elegido
 
-  if(!nombreProducto){ setStatus('entregaStatus', 'No hay productos en esta bodega para entregar.', 'err'); return; }
-  if(!cantidad || cantidad <= 0){ setStatus('entregaStatus', 'Escribe una cantidad mayor a 0.', 'err'); return; }
+  if(!filas.length){ setStatus('entregaStatus', 'Agrega al menos un producto.', 'err'); return; }
   if(!entregadoA){ setStatus('entregaStatus', 'Escribe a quién se le entrega.', 'err'); return; }
 
-  const item = items.find(it=>it.grupo===currentStockBodega && it.name===nombreProducto);
-  if(!item){ setStatus('entregaStatus', 'No encontré ese producto en esta bodega.', 'err'); return; }
-  if(cantidad > item.qty){
-    setStatus('entregaStatus', `No se puede entregar: solo hay ${item.qty} disponibles de "${nombreProducto}" y estás pidiendo entregar ${cantidad}.`, 'err');
-    return;
+  // Se valida TODO primero (incluyendo si el mismo producto se repite en dos
+  // líneas, sumando lo pedido) y solo si todo pasa se aplica algo — así no
+  // queda una entrega a medias si una de las líneas falla.
+  const pedidoPorProducto = {};
+  for(const fila of filas){
+    if(!fila.cantidad || fila.cantidad <= 0){
+      setStatus('entregaStatus', `Pon una cantidad mayor a 0 para "${fila.producto}".`, 'err');
+      return;
+    }
+    pedidoPorProducto[fila.producto] = (pedidoPorProducto[fila.producto]||0) + fila.cantidad;
   }
 
-  item.qty = Math.max(0, item.qty - cantidad);
-  await saveItem(item);
+  const aplicar = [];
+  for(const nombreProducto of Object.keys(pedidoPorProducto)){
+    const cantidad = pedidoPorProducto[nombreProducto];
+    const item = items.find(it=>it.grupo===currentStockBodega && it.name===nombreProducto);
+    if(!item){ setStatus('entregaStatus', `No encontré "${nombreProducto}" en esta bodega.`, 'err'); return; }
+    if(cantidad > item.qty){
+      setStatus('entregaStatus', `No se puede entregar: solo hay ${item.qty} disponibles de "${nombreProducto}" y estás pidiendo entregar ${cantidad}.`, 'err');
+      return;
+    }
+    aplicar.push({item, cantidad});
+  }
 
-  try{
-    await sb.from('entregas').insert({
-      bodega: currentStockBodega, producto: nombreProducto, cantidad,
-      entregado_a: entregadoA, observacion: observacion || null
-    });
-  }catch(e){ console.error(e); }
+  const resumen = [];
+  for(const {item, cantidad} of aplicar){
+    item.qty = Math.max(0, item.qty - cantidad);
+    await saveItem(item);
+    try{
+      await sb.from('entregas').insert({
+        bodega: currentStockBodega, producto: item.name, cantidad,
+        entregado_a: entregadoA, observacion: observacion || null
+      });
+    }catch(e){ console.error(e); }
+    resumen.push(`${cantidad} de "${item.name}" (quedan ${item.qty})`);
+  }
+
+  entregaLineas = [{producto:'', cantidad:1}];
+  document.getElementById('entregaA').value = '';
+  document.getElementById('entregaObservacion').value = '';
+
+  // Se cierra solo el acceso desbloqueado con la clave de admin — para
+  // registrar otra entrega hay que volver a meterla. Si la persona tiene
+  // permiso real (no por clave temporal), esto no le afecta en nada.
+  if(esPermisoPorElevacion(currentStockBodega, 'entrega')){
+    elevacionTemporal = null;
+  }
 
   render();
   renderEntregaCard();
-  document.getElementById('entregaCantidad').value = '1';
-  document.getElementById('entregaA').value = '';
-  document.getElementById('entregaObservacion').value = '';
-  setStatus('entregaStatus', `Entrega registrada: ${cantidad} de "${nombreProducto}" a ${entregadoA}. Quedan ${item.qty}.`, 'ok');
+  setStatus('entregaStatus', `Entrega registrada a ${entregadoA}: ${resumen.join(', ')}.`, 'ok');
 });
 
 document.getElementById('invEditBtn').addEventListener('click', async ()=>{
@@ -2804,6 +2873,7 @@ function seleccionarBodega(b){
   if(b.tipo === 'stock'){
     currentStockBodega = b.nombre;
     verTodosCompacta = false; // al cambiar de bodega, la vista compacta (si aplica) vuelve a arrancar oculta
+    entregaLineas = [{producto:'', cantidad:1}]; // el formulario de entrega arranca limpio en cada bodega
     document.getElementById('stockViewTitle').textContent = enInventario ? 'Inventario' : `Inventario — ${b.nombre}`;
     moverBloqueA(slotId, 'stockViewBlock');
     render();
