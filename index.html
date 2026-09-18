@@ -314,10 +314,33 @@
     background:var(--panel2);border:1px solid var(--line);color:var(--text);
     border-radius:var(--radius-sm);padding:9px 10px;font-size:13px;font-family:var(--font-body);width:100%;
   }
+
+  /* ---- Notificaciones breves (toasts) para usuarios activos ---- */
+  #toastContainer{
+    position:fixed;top:16px;right:16px;z-index:2000;
+    display:flex;flex-direction:column;gap:10px;width:340px;max-width:calc(100vw - 24px);
+    pointer-events:none;
+  }
+  .toast{
+    background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-left:4px solid var(--cyan);border-radius:var(--radius-sm);
+    padding:12px 14px;font-size:12.5px;line-height:1.45;
+    box-shadow:0 10px 30px rgba(0,0,0,0.4);
+    opacity:0;transform:translateX(24px);transition:opacity .25s ease, transform .25s ease;
+    pointer-events:auto;cursor:pointer;
+  }
+  .toast.show{opacity:1;transform:translateX(0);}
+  .toast.toast-ok{border-left-color:#2ecc71;}
+  .toast.toast-warn{border-left-color:#f1c40f;}
+  .toast.toast-info{border-left-color:var(--cyan);}
+  @media (max-width:600px){
+    #toastContainer{left:12px;right:12px;width:auto;top:12px;}
+  }
 </style>
 </head>
 <body>
 <div class="app">
+<div id="toastContainer"></div>
 <div id="viewBlocksStorage" style="display:none;"></div>
 
 <div id="loginModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(5,8,11,0.72);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;padding:16px;">
@@ -1417,6 +1440,62 @@ async function reloadProductosOnly(){
     console.error(e);
     setConnLed('error');
   }
+}
+
+// ---- Notificaciones breves (toasts) para quien está activo en la app ----
+// No dependen de Telegram: si la pestaña está abierta, aparece un aviso
+// flotante arriba a la derecha que se borra solo a los pocos segundos.
+function mostrarToast(mensaje, tipo){
+  const cont = document.getElementById('toastContainer');
+  if(!cont) return;
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + (tipo || 'info');
+  el.innerHTML = mensaje;
+  el.addEventListener('click', () => cerrarToast(el));
+  cont.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => cerrarToast(el), 7000);
+}
+function cerrarToast(el){
+  if(!el || !el.isConnected) return;
+  el.classList.remove('show');
+  setTimeout(() => el.remove(), 300);
+}
+
+// Escucha en tiempo real la tabla de solicitudes de material:
+// - Si eres admin, te avisa apenas llega una solicitud nueva (de cualquier
+//   bodega), sin tener que estar mirando esa pestaña.
+// - Si no eres admin, te avisa cuando responden una solicitud tuya (por
+//   nombre) o una de la bodega que tienes abierta en este momento.
+function subscribeRealtimeSolicitudes(){
+  if(!SUPABASE_URL.startsWith('https://')) return;
+  sb.channel('solicitudes-realtime')
+    .on('postgres_changes', {event:'INSERT', schema:'public', table:'solicitudes_pedido'}, (payload)=>{
+      const row = payload.new || {};
+      if(isAdmin()){
+        mostrarToast('📋 Nueva solicitud en <b>' + escapeHtml(row.bodega||'') + '</b>'
+          + (row.solicitante ? ' de ' + escapeHtml(row.solicitante) : '')
+          + ':<br>' + escapeHtml(row.texto||''), 'info');
+      }
+      if(row.bodega === currentStockBodega) cargarSolicitudesRecientes();
+    })
+    .on('postgres_changes', {event:'UPDATE', schema:'public', table:'solicitudes_pedido'}, (payload)=>{
+      const row = payload.new || {};
+      const anterior = payload.old || {};
+      const seAcabaDeResponder = row.estado === 'respondida' && anterior.estado !== 'respondida';
+      if(seAcabaDeResponder && !isAdmin()){
+        const s = getSession();
+        const esMia = !!(row.solicitante && s && s.username
+          && row.solicitante.trim().toLowerCase() === s.username.trim().toLowerCase());
+        const mismaBodegaAbierta = row.bodega === currentStockBodega;
+        if(esMia || mismaBodegaAbierta){
+          mostrarToast('✅ Te respondieron tu solicitud en <b>' + escapeHtml(row.bodega||'') + '</b>:<br>'
+            + escapeHtml(row.respuesta||''), 'ok');
+        }
+      }
+      if(row.bodega === currentStockBodega) cargarSolicitudesRecientes();
+    })
+    .subscribe();
 }
 
 // ================== Inventario ==================
@@ -4700,6 +4779,7 @@ async function iniciarApp(){
   actualizarNavegacionSegunSesion();
   cargarDashboard();
   subscribeRealtime();
+  subscribeRealtimeSolicitudes();
 }
 iniciarApp();
 
