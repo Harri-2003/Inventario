@@ -2154,10 +2154,19 @@ async function cargarSolicitudesRecientes(){
         if(!confirm('¿Eliminar esta solicitud? Esta acción no se puede deshacer.')) return;
         btn.disabled = true;
         try{
-          const {error} = await sb.from('solicitudes_pedido').delete().eq('id', id);
+          const {error, count} = await sb.from('solicitudes_pedido').delete({count:'exact'}).eq('id', id);
           if(error) throw error;
+          if(!count){
+            alert('No se eliminó nada (probablemente falta el permiso de borrado en la base de datos). Avísale a soporte con este mensaje: sin permiso DELETE en solicitudes_pedido.');
+            btn.disabled = false;
+            return;
+          }
           cargarSolicitudesRecientes();
-        }catch(e){ console.error(e); btn.disabled = false; }
+        }catch(e){
+          console.error(e);
+          alert('No se pudo eliminar la solicitud: ' + (e && e.message ? e.message : e));
+          btn.disabled = false;
+        }
       });
     });
   }catch(e){
