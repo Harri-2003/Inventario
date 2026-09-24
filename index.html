@@ -461,9 +461,13 @@
         <h2>Consultar disponibilidad (texto o imagen)</h2>
         <p class="note">
           Pega el texto de un pedido, o pega/sube una imagen (se lee el texto automáticamente).
-          Busca en TODAS las bodegas tipo Stock y Registro, y te dice qué hay, cuánto, y su estado.
+          Busca en las bodegas que tengas marcadas abajo, y te dice qué hay, cuánto, y su estado.
           No hace falta clave, cualquiera puede usar esto para buscar.
         </p>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Buscar solo en estas bodegas</label>
+          <div id="dispoBodegasFiltro" style="display:flex;flex-wrap:wrap;gap:10px 16px;padding:8px 0;"></div>
+        </div>
         <textarea id="dispoTexto" style="min-height:160px;" placeholder="Pega aquí el mensaje del pedido, ej: 'necesito amarras blancas de 10cm y conectores verdes'"></textarea>
         <div class="row" style="margin-top:10px;">
           <button id="dispoImagenBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m21 15-5-5L6 21"/></svg> Pegar/subir imagen</button>
@@ -817,6 +821,11 @@
           producto si se entregara ese pedido — esto es solo una simulación visual, <b>no descuenta nada de verdad</b>, tu inventario real no cambia.
           Sección privada, solo para quien tenga este permiso.
         </p>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Buscar solo en estas bodegas</label>
+          <div id="pedidoBodegasFiltro" style="display:flex;flex-wrap:wrap;gap:10px 16px;padding:8px 0;"></div>
+          <p class="note" style="margin:2px 0 0;">Las bodegas que ves aquí son las mismas que tienes permitidas en tu usuario — el admin las asigna en "Gestionar usuarios".</p>
+        </div>
         <textarea id="pedidoTexto" style="min-height:180px;" placeholder="3 Carretos de fibra drop 1 hilo&#10;100 Tensores metálicos&#10;10 Ont Tp Link&#10;30 Stickers&#10;50 Rosetas"></textarea>
         <div class="row" style="margin-top:10px;">
           <button id="pedidoImagenBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m21 15-5-5L6 21"/></svg> Subir imagen (texto simple, sin IA)</button>
@@ -1413,6 +1422,8 @@ async function loadAll(){
   renderReporteManualBodegaSelect();
   renderEntregaCard();
   actualizarProyecciones(currentStockBodega);
+  renderPedidoBodegasFiltro();
+  renderDispoBodegasFiltro();
 }
 
 let realtimeDebounce = null;
@@ -3898,6 +3909,60 @@ function expandirConSinonimos(texto){
   return textoExpandido;
 }
 
+// ================== Filtro de bodegas para Verificar pedido / Buscar ==================
+// Antes, "Verificar pedido" y "Buscar disponibilidad" siempre revisaban TODAS
+// las bodegas del sistema, sin importar qué bodegas tenga permitidas cada
+// usuario. Ahora se muestra una lista de checkboxes con SOLO las bodegas que
+// ese usuario puede ver (lo mismo que ya se asigna en "Gestionar usuarios" →
+// Bodegas permitidas), y se puede desmarcar para buscar en menos todavía.
+function _bodegaChecklistHtml(containerId, listaBodegas){
+  if(!listaBodegas.length){
+    return '<span class="note" style="margin:0;">No tienes ninguna bodega permitida para buscar aquí.</span>';
+  }
+  return `
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--cyan);cursor:pointer;font-weight:600;">
+      <input type="checkbox" class="${containerId}-todas" checked> Todas
+    </label>
+  ` + listaBodegas.map(b=>`
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-mut);cursor:pointer;">
+      <input type="checkbox" class="${containerId}-item" value="${escapeHtml(b.nombre)}" checked> ${escapeHtml(b.nombre)}
+    </label>
+  `).join('');
+}
+function _wireBodegaChecklist(containerId){
+  const box = document.getElementById(containerId);
+  if(!box) return;
+  const todas = box.querySelector(`.${containerId}-todas`);
+  const items = () => Array.from(box.querySelectorAll(`.${containerId}-item`));
+  if(todas){
+    todas.addEventListener('change', ()=>{ items().forEach(chk => chk.checked = todas.checked); });
+  }
+  items().forEach(chk=>{
+    chk.addEventListener('change', ()=>{ if(todas) todas.checked = items().every(c=>c.checked); });
+  });
+}
+// Devuelve la lista de nombres de bodega marcados, o null si el cuadro de
+// filtro no existe en esta página (para no romper nada si algo cambia).
+function bodegasSeleccionadas(containerId){
+  const box = document.getElementById(containerId);
+  if(!box) return null;
+  return Array.from(box.querySelectorAll(`.${containerId}-item:checked`)).map(c=>c.value);
+}
+function renderPedidoBodegasFiltro(){
+  const box = document.getElementById('pedidoBodegasFiltro');
+  if(!box) return;
+  const lista = bodegas.filter(b=>b.tipo==='stock' && puedeVerBodega(b.nombre));
+  box.innerHTML = _bodegaChecklistHtml('pedidoBodegasFiltro', lista);
+  _wireBodegaChecklist('pedidoBodegasFiltro');
+}
+function renderDispoBodegasFiltro(){
+  const box = document.getElementById('dispoBodegasFiltro');
+  if(!box) return;
+  const lista = bodegas.filter(b=>(b.tipo==='stock' || b.tipo==='log') && puedeVerBodega(b.nombre));
+  box.innerHTML = _bodegaChecklistHtml('dispoBodegasFiltro', lista);
+  _wireBodegaChecklist('dispoBodegasFiltro');
+}
+
 function aplicarReglasPedido(texto, cantidad){
   const textoNorm = normalizeName(texto);
   let cantidadReal = cantidad;
@@ -3922,6 +3987,9 @@ document.getElementById('verificarPedidoBtn').addEventListener('click', async ()
   const textoCompleto = document.getElementById('pedidoTexto').value.trim();
   if(!textoCompleto){ setStatus('pedidoOcrStatus','Pega el pedido primero.','err'); return; }
 
+  const bodegasElegidas = bodegasSeleccionadas('pedidoBodegasFiltro');
+  if(bodegasElegidas && !bodegasElegidas.length){ setStatus('pedidoOcrStatus','Marca al menos una bodega arriba para poder buscar.','err'); return; }
+
   const lineas = textoCompleto.split('\n').map(l=>l.trim()).filter(Boolean);
   if(!lineas.length){ setStatus('pedidoOcrStatus','No encontré líneas para revisar.','err'); return; }
 
@@ -3930,6 +3998,7 @@ document.getElementById('verificarPedidoBtn').addEventListener('click', async ()
     const {data, error} = await sb.from('productos').select('*');
     if(error) throw error;
     todosStock = (data||[]).map(r=>({name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
+    if(bodegasElegidas) todosStock = todosStock.filter(it=>bodegasElegidas.includes(it.grupo));
   }catch(e){
     setStatus('pedidoOcrStatus','No se pudo consultar el inventario: ' + e.message, 'err');
     return;
@@ -4162,6 +4231,9 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
   const textoCompleto = document.getElementById('dispoTexto').value.trim();
   if(!textoCompleto){ setStatus('dispoOcrStatus','Pega o escribe el pedido primero.','err'); return; }
 
+  const bodegasElegidas = bodegasSeleccionadas('dispoBodegasFiltro');
+  if(bodegasElegidas && !bodegasElegidas.length){ setStatus('dispoOcrStatus','Marca al menos una bodega arriba para poder buscar.','err'); return; }
+
   // Cada línea del cuadro de texto se busca por separado (un pedido puede
   // traer varios productos, uno por línea, y cada uno se filtra a fondo).
   const lineas = textoCompleto.split('\n').map(l=>l.trim()).filter(Boolean);
@@ -4177,6 +4249,10 @@ document.getElementById('dispoBuscarBtn').addEventListener('click', async ()=>{
     if(tron.error) throw tron.error;
     todosStock = (prod.data||[]).map(r=>({name:r.nombre, qty:Number(r.cantidad), min:Number(r.minimo), grupo:r.grupo}));
     todosLog = (tron.data||[]).map(r=>({name:r.material, metros:Number(r.metros), grupo:r.bodega||'Troncal', entregadoA:r.entregado_a}));
+    if(bodegasElegidas){
+      todosStock = todosStock.filter(it=>bodegasElegidas.includes(it.grupo));
+      todosLog = todosLog.filter(it=>bodegasElegidas.includes(it.grupo));
+    }
   }catch(e){
     setStatus('dispoOcrStatus','No se pudo consultar el inventario: ' + e.message, 'err');
     return;
