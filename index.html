@@ -424,6 +424,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
       <span class="tab-label">Pedidos</span>
     </button>
+    <button class="tab-btn" data-tab="actas" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="m9 15 2 2 4-4"/></svg>
+      <span class="tab-label">Actas</span>
+    </button>
   </nav>
 
   <main>
@@ -842,6 +846,15 @@
     </section>
 
     <!-- Panel oculto: no tiene botón en la barra de pestañas, solo se abre con el ícono de engranaje + clave -->
+    <!-- ===== Actas de almacén (EPP, herramienta y dotación) — se abre desde Google Apps Script ===== -->
+    <section class="tab-panel" data-panel="actas" style="display:none">
+      <div class="card" style="padding:0;overflow:hidden;">
+        <p class="note" id="actasEstado" style="padding:16px;margin:0;">Cargando Actas…</p>
+        <iframe id="actasFrame" title="Actas de almacén" style="display:none;width:100%;height:calc(100vh - 150px);min-height:620px;border:0;"
+          allow="clipboard-write"></iframe>
+      </div>
+    </section>
+
     <section class="tab-panel" data-panel="admin" style="display:none">
       <button class="admin-back" id="adminBackBtn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
@@ -975,6 +988,12 @@
           <button id="addUsuarioBtn">+ Agregar usuario</button>
         </div>
         <div class="status" id="usuariosStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Acceso a Actas de almacén</h2>
+        <p class="note">Marca quién puede ver la pestaña <b>Actas</b> (entregas de EPP, herramienta y dotación con firma por Telegram). Los administradores siempre la ven.</p>
+        <div id="actasAccesoLista" class="note">Abre este panel para cargar la lista.</div>
       </div>
 
       <div class="card">
@@ -4352,6 +4371,7 @@ function switchTab(name){
   if(name==='graficos') renderGraficoBodegaSelect();
   if(name==='dashboard') cargarDashboard();
   if(name==='pedidos') cargarReglasPedidos();
+  if(name==='actas') abrirActas();
   window.scrollTo({top:0, behavior:'instant'});
 }
 document.querySelectorAll('.tab-btn').forEach(btn=>{
@@ -4365,6 +4385,7 @@ document.getElementById('adminGearBtn').addEventListener('click', async ()=>{
   renderEntregaCard();
   cargarHistorial();
   renderUsuariosAdmin();
+  renderAccesoActas();
   renderComprasBodegaSelect();
   cargarBusquedasSinResultado();
   cargarReglasPedidos();
@@ -4785,6 +4806,7 @@ function actualizarNavegacionSegunSesion(){
   if(btnGraficos) btnGraficos.style.display = puedeGraficos ? '' : 'none';
   if(btnPedidos) btnPedidos.style.display = puedePedidos ? '' : 'none';
   if(btnDashboard) btnDashboard.style.display = puedeResumen ? '' : 'none';
+  actualizarTabActas();
 
   // Si la pestaña que estaba activa quedó oculta para este usuario, se cambia
   // sola a la primera que sí pueda ver (para no dejarlo viendo una en blanco).
@@ -4800,6 +4822,67 @@ function actualizarNavegacionSegunSesion(){
   const userLabel = document.getElementById('sessionUserLabel');
   if(userLabel) userLabel.textContent = s ? s.username : '';
 }
+
+// ================== Actas de almacén (pestaña que abre Google Apps Script) ==================
+// Supabase entrega un enlace con un pase firmado que vence en 12 horas, solo a admins
+// y a quien tenga acceso marcado en "Acceso a Actas de almacén". Aquí no se guarda ninguna clave.
+let actasUrlCache = null, actasUrlHora = 0;
+async function obtenerUrlActas(forzar){
+  const s = getSession();
+  if(!s) return null;
+  if(!forzar && actasUrlCache && Date.now() - actasUrlHora < 6*3600*1000) return actasUrlCache;
+  try{
+    const {data, error} = await sb.rpc('actas_url', {p_username: s.username, p_password: s.password});
+    if(error) throw error;
+    actasUrlCache = data || null; actasUrlHora = Date.now();
+  }catch(e){ console.error('Actas:', e); actasUrlCache = null; }
+  return actasUrlCache;
+}
+async function actualizarTabActas(){
+  const btn = document.querySelector('.tab-btn[data-tab="actas"]');
+  if(!btn) return;
+  btn.style.display = (await obtenerUrlActas()) ? '' : 'none';
+}
+async function abrirActas(){
+  const est = document.getElementById('actasEstado'), fr = document.getElementById('actasFrame');
+  if(!est || !fr) return;
+  const url = await obtenerUrlActas(Date.now() - actasUrlHora > 3600*1000);
+  if(!url){
+    est.textContent = 'Tu usuario no tiene acceso a Actas. Pídeselo a un administrador.';
+    est.style.display = ''; fr.style.display = 'none'; return;
+  }
+  if(fr.dataset.src !== url){ fr.src = url + '&embed=1'; fr.dataset.src = url; }
+  est.style.display = 'none'; fr.style.display = '';
+}
+async function renderAccesoActas(){
+  const box = document.getElementById('actasAccesoLista');
+  const s = getSession();
+  if(!box || !s || !s.esAdmin) return;
+  box.textContent = 'Cargando…';
+  try{
+    const [u, a] = await Promise.all([
+      sb.rpc('listar_usuarios_admin', {p_username: s.username, p_password: s.password}),
+      sb.rpc('actas_listar_acceso', {p_admin_username: s.username, p_admin_password: s.password})
+    ]);
+    if(u.error) throw u.error;
+    if(a.error) throw a.error;
+    const con = new Set((a.data || []).map(x => String(typeof x === 'string' ? x : (x.actas_listar_acceso || x.username || '')).toLowerCase()));
+    box.innerHTML = (u.data || []).map(x => `<label style="display:flex;gap:8px;align-items:center;margin:6px 0;">
+        <input type="checkbox" data-actas-user="${escapeHtml(x.username)}" ${x.esAdmin ? 'checked disabled' : (con.has(String(x.username).toLowerCase()) ? 'checked' : '')}>
+        ${escapeHtml(x.username)}${x.esAdmin ? ' <span class="note" style="margin:0;">(admin, siempre tiene acceso)</span>' : ''}</label>`).join('') || 'No hay usuarios.';
+  }catch(e){
+    box.innerHTML = `<span style="color:var(--red);">No se pudo cargar: ${escapeHtml(e.message)}. ¿Ya ejecutaste el SQL de Actas en Supabase?</span>`;
+  }
+}
+document.getElementById('actasAccesoLista').addEventListener('change', async (e)=>{
+  const c = e.target.closest('[data-actas-user]');
+  if(!c) return;
+  const s = getSession();
+  c.disabled = true;
+  const {error} = await sb.rpc('actas_dar_acceso', {p_admin_username: s.username, p_admin_password: s.password, p_username: c.dataset.actasUser, p_dar: c.checked});
+  if(error){ alert('No se pudo guardar: ' + error.message); c.checked = !c.checked; }
+  c.disabled = false;
+});
 
 document.getElementById('logoutBtn').addEventListener('click', ()=>{
   if(!confirm('¿Cerrar sesión? Vas a tener que volver a iniciar sesión para usar la app.')) return;
