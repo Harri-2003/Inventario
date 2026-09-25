@@ -4564,6 +4564,12 @@ function applyTheme(theme){
   document.body.classList.toggle('theme-light', theme === 'light');
   document.getElementById('themeIcon').innerHTML = theme === 'light' ? ICONO_SOL : ICONO_LUNA;
   localStorage.setItem('theme', theme);
+  // Si la pestaña Actas ya está abierta, se recarga con el tema nuevo
+  const frActas = document.getElementById('actasFrame');
+  if(frActas && frActas.dataset.full){
+    const f = frActas.dataset.full.replace(/&tema=\w+/, '&tema=' + theme);
+    if(f !== frActas.dataset.full){ frActas.dataset.full = f; frActas.src = f; }
+  }
 }
 
 document.getElementById('themeToggleBtn').addEventListener('click', ()=>{
@@ -4851,7 +4857,9 @@ async function abrirActas(){
     est.textContent = 'Tu usuario no tiene acceso a Actas. Pídeselo a un administrador.';
     est.style.display = ''; fr.style.display = 'none'; return;
   }
-  if(fr.dataset.src !== url){ fr.src = url + '&embed=1'; fr.dataset.src = url; }
+  const tema = document.body.classList.contains('theme-light') ? 'light' : 'dark';
+  const completa = url + '&embed=1&tema=' + tema;   // Actas toma los mismos colores de esta página
+  if(fr.dataset.full !== completa){ fr.src = completa; fr.dataset.full = completa; }
   est.style.display = 'none'; fr.style.display = '';
 }
 async function renderAccesoActas(){
